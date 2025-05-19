@@ -27,7 +27,7 @@ jobs:
       - name: Add Conan remote
         run: |
           conan remote add conan-silabs-net https://conan.silabs.net
-          conan remote login conan-silabs-net buildengineer -p ${{ secrets.SVC_BUILDENGINEER_CONAN_TOKEN }}
+          conan remote login conan-silabs-net buildengineer -p ${{ secrets.SVC_BUILDENGINEER }}
 
       - name: Create package
         run: conan create .
