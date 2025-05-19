@@ -1,0 +1,47 @@
+name: Build Renode Conan Package
+
+on: [workflow_dispatch, push]
+
+jobs:
+  build:
+    runs-on: silabs-internal
+    container: 
+      image: 'artifactory-local.silabs.net/gsdk-docker-production/gsdk_nomad_containers/slt_build_env:latest'
+      options: --user root
+      env:
+        CONAN_HOME: ~/.silabs/slt/installs/conan
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+      
+      - name: Setup Conan
+        id: setup-conan
+        run: |
+          # Foo as a package doesn't exist and we are doing this to get the conan engine.
+          slt install foo --engine conan || true
+
+      # Disable the fully public remote
+      - name: List remotes and disable Silabs public remote and add conan public remote
+        run: |
+          conan remote list
+          # Disabled the remote as it is causing timeout issues.
+          conan remote disable conan-silabs-net
+          # Required to get the cmake package
+          conan remote add conancenter https://center2.conan.io 
+          
+      - name: Create package
+        id: create-package
+        uses: SiliconLabsSoftware/action-conan@main
+        with:
+          conanfile-path: './conanfile.py'
+          remote-name: sw-arch-conan-staging
+          remote-url: https://artifactory.silabs.net/artifactory/api/conan/sw-arch-conan-staging
+          remote-username: svc_swarch
+          remote-token: ${{ secrets.SVC_SWARCH_CONAN_TOKEN }}
+          create: true
+          publish: true
+          conan-command-options: 'create'
+      
