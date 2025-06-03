@@ -35,6 +35,12 @@ jobs:
         run: |
           conan create .
 
+      - name: Install required python packages
+        run: |
+          pip install -r tests/requirements.txt
+          pip install -r tools/csv2resd/requirements.txt
+          pip install -r tools/execution_tracer/requirements.txt
+          
       - name: Create Renode package
         run: conan create .
       
