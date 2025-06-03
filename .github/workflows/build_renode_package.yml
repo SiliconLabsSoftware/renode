@@ -7,9 +7,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     env:
-      CONAN_HOME: ~/.conan2/${{ matrix.os == 'windows-latest' && 'Windows' || matrix.os == 'macos-latest' && 'Macos' || 'Linux' }}
+      CONAN_HOME: ~/.conan2/${{ matrix.os == 'macos-latest' && 'Macos' || 'Linux' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -41,6 +41,6 @@ jobs:
       - name: Store artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: renode-artifacts
-          path: ~/.conan2/${{ matrix.os == 'windows-latest' && 'Windows' || matrix.os == 'macos-latest' && 'Macos' || 'Linux' }}/*
+          name: renode-artifacts-${{ matrix.os == 'macos-latest' && 'Macos' || 'Linux' }}
+          path: ~/.conan2/${{ matrix.os == 'macos-latest' && 'Macos' || 'Linux' }}/*
           retention-days: 1
