@@ -8,6 +8,8 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      CONAN_HOME: ~/.conan2/${{ matrix.os == 'windows-latest' && 'Windows' || matrix.os == 'macos-latest' && 'Macos' || 'Linux' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,15 +29,11 @@ jobs:
       - name: Configure Conan profile
         run: |
           conan profile detect
-        env:
-          CONAN_USER_HOME: ~/.conan2/${{ matrix.os == 'windows-latest' && 'Windows' || matrix.os == 'macos-latest' && 'Macos' || 'Linux' }}
 
       - name: create dotnet Package
         working-directory: dot_net
         run: |
           conan create .
-        env:
-          CONAN_HOME: ~/.conan2/${{ matrix.os == 'windows-latest' && 'Windows' || matrix.os == 'macos-latest' && 'Macos' || 'Linux' }}
 
       - name: Create Renode package
         run: conan create .
