@@ -23,14 +23,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install conan
+      
+      - name: Configure Conan profile
+        run: |
           conan profile detect
+        env:
+          CONAN_USER_HOME: ~/.conan2/${{ matrix.os == 'windows-latest' && 'Windows' || matrix.os == 'macos-latest' && 'Macos' || 'Linux' }}
 
       - name: create dotnet Package
         working-directory: dot_net
         run: |
           conan create .
         env:
-          CONAN_HOME: ${{ github.workspace }}/.conan2/${{ matrix.os == 'windows-latest' && 'Windows' || matrix.os == 'macos-latest' && 'Macos' || 'Linux' }}
+          CONAN_HOME: ~/.conan2/${{ matrix.os == 'windows-latest' && 'Windows' || matrix.os == 'macos-latest' && 'Macos' || 'Linux' }}
 
       - name: Create Renode package
         run: conan create .
@@ -39,5 +44,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: renode-artifacts
-          path: ${{ github.workspace }}/.conan2/${{ matrix.os == 'windows-latest' && 'Windows' || matrix.os == 'macos-latest' && 'Macos' || 'Linux' }}/*
+          path: ~/.conan2/${{ matrix.os == 'windows-latest' && 'Windows' || matrix.os == 'macos-latest' && 'Macos' || 'Linux' }}/*
           retention-days: 1
