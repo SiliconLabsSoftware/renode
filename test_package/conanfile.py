@@ -13,6 +13,10 @@ class TestRenodePackage(ConanFile):
         self.requires("dotnet_tools/8.0.409@silabs")
 
     def build(self):
+        pass
+
+
+    def test(self):
         self.output.info("Building test package...")
         venv_path = os.path.join(self.build_folder, "venv")
         if os.name != "nt":
@@ -35,8 +39,7 @@ class TestRenodePackage(ConanFile):
 
         # Optionally store Python path for later test usage
         self.runenv_info.define_path("PYTHONPATH", venv_path)
-
-    def test(self):
+        
         renode_pkg = self.dependencies["renode"].package_folder
         if can_run(self):
             self.run("echo $PATH", env="conanrun")
