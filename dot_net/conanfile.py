@@ -51,7 +51,11 @@ class DotnetToolsConan(ConanFile):
         else:
             raise ValueError("Unsupported OS")
 
-        get(self, url, strip_root=True, destination=self.build_folder)
+        # Use strip_root=True for tar.gz, but False for zip files to avoid ConanException
+        if url.endswith(".zip"):
+            get(self, url, strip_root=False, destination=self.build_folder)
+        else:
+            get(self, url, strip_root=True, destination=self.build_folder)
 
     def package(self):
         # Copy everything to the package folder
