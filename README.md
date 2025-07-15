@@ -1,8 +1,21 @@
 # Renode
 
+Copyright (c) 2010-2025 [Silicon Labs](http://www.silabs.com/)
+
 Copyright (c) 2010-2025 [Antmicro](https://www.antmicro.com)
 
 [![View on Antmicro Open Source Portal](https://img.shields.io/badge/View%20on-Antmicro%20Open%20Source%20Portal-332d37?style=flat-square)](https://opensource.antmicro.com/projects/renode)
+
+## Silicon Labs Support
+
+This fork provides additional support for Silicon Labs devices. Specifically, EFR32xG24, EFR32xG26 and SixG301. 
+Supported development boards include:
+* EFR32xG24: 4186c, 4187c
+* EFR32xG26: 4116a, 4117a, 4118a, 4120a, 4121a
+* SixG301: 1019a, 4407a
+
+For instructions on building Renode from source, see the [Building from source](#building-from-source) section below.
+For more information on how to use emulated Silicon Labs devices, see the example script [`scripts/complex/silabs/twonode_demo.resc`](scripts/complex/silabs/twonode_demo.resc) included in this repository.
 
 ## What is Renode?
 
