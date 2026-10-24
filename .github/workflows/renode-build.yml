@@ -2,9 +2,7 @@ name: Renode CI
 
 on:
   push:
-    branches: ['silabs-main']
   pull_request:
-    branches: ['silabs-main']
   workflow_dispatch:
 
 # permissions can be required here when reusable workflows that need it are called
