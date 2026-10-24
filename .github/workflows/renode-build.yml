@@ -8,7 +8,7 @@ on:
 # permissions can be required here when reusable workflows that need it are called
 permissions:
   id-token: write
-  actions: read
+  actions: write
   contents: read
 
 jobs:
@@ -43,7 +43,11 @@ jobs:
       - name: ⚒️ Zip up the distribution package directory.
         run: ./r dist-zip
 
-
+      - name: 📤 Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist.zip
 
   create-test-matrix:
     name: 🧪 Create test matrix
@@ -85,6 +89,11 @@ jobs:
 
       - name: 🔨 Build host library
         run: ./r build-host-library
+
+      - name: 📥 Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
 
       - name: 🔨 Unzip dist artifact.
         run: ./r dist-unzip
@@ -130,6 +139,10 @@ jobs:
       - name: 🪄 Init dev scripts
         run: ./r init
 
+      - name: 📥 Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
 
       - name: 🔨 Unzip dist artifact.
         run: ./r dist-unzip
