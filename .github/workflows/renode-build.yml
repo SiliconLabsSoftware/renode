@@ -101,11 +101,6 @@ jobs:
       - name: 🔨 Prepare dist artifact.
         run: ./r dist-prep
 
-      - name: 🪚 Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.14.4'
-
       # Pip dependencies for tests (pyrenode3, pybgapi, test_lib), installed and verified in testing-set-up
       - name: 🪚 Set up testing infrastructure.
         run: ./r testing-set-up
