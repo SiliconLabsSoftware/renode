@@ -20,7 +20,138 @@
       "tests/unit-tests/python-engine.robot",
       "tests/unit-tests/riscv-unit-tests.robot",
       "tests/unit-tests/robot-integration.robot",
-      "tests/unit-tests/virtual-time.robot"
+      "tests/unit-tests/virtual-time.robot",
+      "tests/unit-tests/riscv-zcb-zcmp-zcmt-extensions.robot",
+      "tests/unit-tests/riscv-zicond-extension.robot"
+    ]
+  },
+  "silabs-unit-tests-protimer": {
+    "title": "SiLabs Unit Tests: PROTIMER",
+    "tests": [
+      {
+        "test": "tests/peripherals/SiLabs/PROTIMER.robot",
+        "params": {
+          "LPW_MODEL": "xg22"
+        }
+      },
+      {
+        "test": "tests/peripherals/SiLabs/PROTIMER.robot",
+        "params": {
+          "LPW_MODEL": "xg24"
+        }
+      },
+      {
+        "test": "tests/peripherals/SiLabs/PROTIMER.robot",
+        "params": {
+          "LPW_MODEL": "xg301"
+        }
+      }
+    ]
+  },
+  "silabs-unit-tests-ldma": {
+    "title": "SiLabs Unit Tests: LDMA",
+    "tests": [
+      {
+        "test": "tests/peripherals/SiLabs/LDMA.robot",
+        "params": {
+          "LDMA_VERSION": "0_1"
+        }
+      },
+      {
+        "test": "tests/peripherals/SiLabs/LDMA.robot",
+        "params": {
+          "LDMA_VERSION": "0_3"
+        }
+      },
+      {
+        "test": "tests/peripherals/SiLabs/LDMA.robot",
+        "params": {
+          "LDMA_VERSION": "3_3"
+        }
+      }
+    ]
+  },
+  "silabs-unit-tests-frc": {
+    "title": "SiLabs Unit Tests: FRC",
+    "tests": [
+      {
+        "test": "tests/peripherals/SiLabs/FRC.robot",
+        "params": {
+          "LPW_MODEL": "xg22"
+        }
+      },
+      {
+        "test": "tests/peripherals/SiLabs/FRC.robot",
+        "params": {
+          "LPW_MODEL": "xg24"
+        }
+      },
+      {
+        "test": "tests/peripherals/SiLabs/FRC.robot",
+        "params": {
+          "LPW_MODEL": "xg301"
+        }
+      }
+    ]
+  },
+  "silabs-unit-tests-timer": {
+    "title": "SiLabs Unit Tests: TIMER",
+    "tests": [
+      {
+        "test": "tests/peripherals/SiLabs/TIMER.robot",
+        "params": {
+          "IP_VERSION": "0"
+        }
+      },
+      {
+        "test": "tests/peripherals/SiLabs/TIMER.robot",
+        "params": {
+          "IP_VERSION": "1"
+        }
+      },
+      {
+        "test": "tests/peripherals/SiLabs/TIMER.robot",
+        "params": {
+          "IP_VERSION": "2"
+        }
+      }
+    ]
+  },
+  "silabs-unit-tests-eusart": {
+    "title": "SiLabs Unit Tests: EUSART",
+    "tests": [
+      {
+        "test": "tests/peripherals/SiLabs/EUSART.robot",
+        "params": {
+          "IP_VERSION": "2"
+        }
+      },
+      {
+        "test": "tests/peripherals/SiLabs/EUSART.robot",
+        "params": {
+          "IP_VERSION": "4"
+        }
+      }
+    ]
+  },
+  "silabs-unit-tests-crypto": {
+    "title": "SiLabs Unit Tests (Miscellaneous)",
+    "tests": [
+      "tests/peripherals/SiLabs/secure_engine_commands.py",
+      "tests/peripherals/SiLabs/SYMCRYPTO_1.py"
+    ]
+  },
+  "silabs-unit-tests-lpw-rx": {
+    "title": "SiLabs Unit Tests: LPW RX",
+    "tests": [
+      "tests/peripherals/SiLabs/LPW_RX.robot"
+    ]
+  },
+  "silabs-unit-tests-misc": {
+    "title": "SiLabs Unit Tests (Miscellaneous)",
+    "tests": [
+      "tests/peripherals/SiLabs/SYSRTC_2.robot",
+      "tests/peripherals/SiLabs/WDOG_1.robot"
     ]
   },
   "railtest-xg22": {
