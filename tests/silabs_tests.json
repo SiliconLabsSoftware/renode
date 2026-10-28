@@ -163,7 +163,7 @@
         "test": "tests/platforms/SiLabs/openthread.py",
         "params": {
           "BOARD": "brd4407a",
-          "UART": "usart0",
+          "UART": "eusart0",
           "ELF": "https://github.com/SiliconLabsSoftware/renode/releases/download/firmware-dev/sixg301_ot-cli-ftd_5_18_26.out"
         }
       }
