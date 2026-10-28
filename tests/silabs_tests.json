@@ -185,6 +185,58 @@
       }
     ]
   },
+  "ble-ncp-xg22": {
+    "title": "BLE NCP xG22",
+    "tests": [
+      {
+        "test": "tests/platforms/SiLabs/ble_ncp.py",
+        "params": {
+          "BOARD": "brd4182a",
+          "UART": "eusart0",
+          "ELF": "https://github.com/SiliconLabsSoftware/renode/releases/download/firmware-dev/xg22_bt_ncp_10_15_26.out"
+        }
+      }
+    ]
+  },
+  "ble-ncp-xg24": {
+    "title": "BLE NCP xG24",
+    "tests": [
+      {
+        "test": "tests/platforms/SiLabs/ble_ncp.py",
+        "params": {
+          "BOARD": "brd4186c",
+          "UART": "eusart0",
+          "ELF": "https://github.com/SiliconLabsSoftware/renode/releases/download/firmware-dev/xg24_bt_ncp_freertos_10_15_26.out"
+        }
+      }
+    ]
+  },
+  "ble-ncp-xg26": {
+    "title": "BLE NCP xG26",
+    "tests": [
+      {
+        "test": "tests/platforms/SiLabs/ble_ncp.py",
+        "params": {
+          "BOARD": "brd4116a",
+          "UART": "eusart0",
+          "ELF": "https://github.com/SiliconLabsSoftware/renode/releases/download/firmware-dev/xg26_bt_ncp_freertos_10_15_26.out"
+        }
+      }
+    ]
+  },
+  "ble-ncp-sixg301": {
+    "title": "BLE NCP SixG301",
+    "tests": [
+      {
+        "test": "tests/platforms/SiLabs/ble_ncp.py",
+        "params": {
+          "BOARD": "brd4407a",
+          "UART": "eusart0",
+          "ELF": "https://github.com/SiliconLabsSoftware/renode/releases/download/firmware-dev/sixg301_bt_ncp_freertos_10_15_26.out"
+        }
+      }
+    ]
+  },
   "dmp-xg24": {
     "title": "Dynamic Multiprotocol (Zigbee,BLE) xG24",
     "tests": [
