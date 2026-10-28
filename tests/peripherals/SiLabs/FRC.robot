@@ -529,7 +529,7 @@ Frc Raises Every Word Counter Compare Crossed By The Frame
     Force Tx
 
     Frc Interrupt Flags Should Be Set  ${FRC_IF_WCNTCMP_ALL}
-    Assert IRQ Is Set           radio  FrameControllerIRQ
+    Assert IRQ Is Set           sysbus.radio  FrameControllerIRQ
 
 Frc Leaves A Word Counter Compare Beyond The Frame Clear
     Create Machine

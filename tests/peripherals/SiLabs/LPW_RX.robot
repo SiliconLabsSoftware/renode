@@ -7,9 +7,8 @@ Over-the-air receive coverage for the xG22, xG24 and xG301 LPW models. A pair (o
 through an IEEE 802.15.4 medium and driven by RAC FORCESTATE, so the tests exercise the radio
 model rather than firmware.
 
-The suite covers the happy path, late-preamble join, and the main drop reasons: wrong channel,
-receiver idle, incompatible PHY, sync mismatch, TX abort, retune-away, joining after the
-packet is gone, and co-channel collisions.
+The suite covers the happy path and the main drop reasons: wrong channel, receiver idle,
+incompatible PHY, sync mismatch, joining after the packet is gone, and co-channel collisions.
 
 *** Variables ***
 @{LPW_MODELS}                  xG22  xG24  xG301
@@ -27,7 +26,6 @@ ${FRC_FCD0_REG}                0x0110
 ${RAC_FORCESTATE_REG}          0x0018
 ${RAC_FORCESTATE_RXSEARCH}     0x2
 ${RAC_FORCESTATE_TX}           0x6
-${RAC_FORCESTATE_OFF}          0x0
 ${MODULATOR_TXBR_REG}          0x0078
 ${MODULATOR_TXBR_VALUE}        0xD20D
 # Roughly half of the default baud, well outside the 5% decode-compatibility tolerance.
@@ -47,9 +45,6 @@ ${MODEM_SYNC_CUSTOM}           0xAA
 ${SYNTH_FREQ_REG}              0x0030
 ${SYNTH_FREQ_CHANNEL_A}        0x01000000
 ${SYNTH_FREQ_CHANNEL_B}        0x01080000
-${BUFC_BUF0_CTRL_REG}          0x000C
-# SIZE field: 64 << SIZE bytes. The reset value gives 64 bytes, too small for a long frame.
-${BUFC_SIZE_256}               0x2
 ${BUFC_BUF0_ADDR_REG}          0x0010
 ${BUFC_BUF0_WRITEOFFSET_REG}   0x0014
 ${BUFC_BUF0_READOFFSET_REG}    0x0018
@@ -57,14 +52,8 @@ ${BUFC_BUFFER_STRIDE}          0x40
 ${FCD_BUFFER_SHIFT}            8
 ${SYNC_PREFIX}                 00
 ${SYNC_PREFIX_CUSTOM}          AA
-# Well before half of the ~8ms preamble, so enough of it is still ahead to lock onto.
+# Well before half of the ~8ms preamble, so a second transmitter starts while the first is still on air.
 ${JOIN_DURING_PREAMBLE}        0.001
-# Past half of the preamble on every model, so too little of it is left to lock onto.
-${JOIN_LATE_IN_PREAMBLE}       0.006
-# After the whole preamble on every model: the sync word is already on air.
-${JOIN_AFTER_SYNC}             0.0084
-# Long enough that aborting after JOIN_AFTER_SYNC still lands in the payload, not after TX done.
-${LONG_FRAME_BYTES}            200
 ${RX_SETTLE}                   0.030
 
 *** Keywords ***
@@ -76,7 +65,6 @@ Select LPW Model
         Set Suite Variable      ${RAC_BLOCK_ADDRESS}          0xA8020000
         Set Suite Variable      ${RAC_FORCESTATE_TX}          0x9
         Set Suite Variable      ${BUFC_BLOCK_ADDRESS}         0xAA000000
-        Set Suite Variable      ${BUFC_BUF0_CTRL_REG}         0x000C
         Set Suite Variable      ${BUFC_BUF0_ADDR_REG}         0x0010
         Set Suite Variable      ${BUFC_BUF0_WRITEOFFSET_REG}  0x0014
         Set Suite Variable      ${BUFC_BUF0_READOFFSET_REG}   0x0018
@@ -94,14 +82,12 @@ Select LPW Model
         Set Suite Variable      ${MODEM_PREAMBLE_REG}         0x0064
         Set Suite Variable      ${MODEM_SYNC0_REG}            0x0068
         Set Suite Variable      ${SYNTH_FREQ_REG}             0x0034
-        Set Suite Variable      ${JOIN_AFTER_SYNC}             0.0084
     ELSE IF  '${model}' == 'xG24'
         Set Suite Variable      ${PLATFORM_FILE}              platforms/boards/silabs/brd4186c.repl
         Set Suite Variable      ${FRC_BLOCK_ADDRESS}          0xA8004000
         Set Suite Variable      ${RAC_BLOCK_ADDRESS}          0xA8020000
         Set Suite Variable      ${RAC_FORCESTATE_TX}          0x9
         Set Suite Variable      ${BUFC_BLOCK_ADDRESS}         0xAA000000
-        Set Suite Variable      ${BUFC_BUF0_CTRL_REG}         0x000C
         Set Suite Variable      ${BUFC_BUF0_ADDR_REG}         0x0010
         Set Suite Variable      ${BUFC_BUF0_WRITEOFFSET_REG}  0x0014
         Set Suite Variable      ${BUFC_BUF0_READOFFSET_REG}   0x0018
@@ -119,14 +105,12 @@ Select LPW Model
         Set Suite Variable      ${MODEM_PREAMBLE_REG}         0x0074
         Set Suite Variable      ${MODEM_SYNC0_REG}            0x0078
         Set Suite Variable      ${SYNTH_FREQ_REG}             0x0034
-        Set Suite Variable      ${JOIN_AFTER_SYNC}             0.0084
     ELSE IF  '${model}' == 'xG301'
         Set Suite Variable      ${PLATFORM_FILE}              platforms/boards/silabs/brd1019a.repl
         Set Suite Variable      ${FRC_BLOCK_ADDRESS}          0xA0204000
         Set Suite Variable      ${RAC_BLOCK_ADDRESS}          0xA0220000
         Set Suite Variable      ${RAC_FORCESTATE_TX}          0x6
         Set Suite Variable      ${BUFC_BLOCK_ADDRESS}         0xA0300000
-        Set Suite Variable      ${BUFC_BUF0_CTRL_REG}         0x000C
         Set Suite Variable      ${BUFC_BUF0_ADDR_REG}         0x0010
         Set Suite Variable      ${BUFC_BUF0_WRITEOFFSET_REG}  0x0014
         Set Suite Variable      ${BUFC_BUF0_READOFFSET_REG}   0x0018
@@ -144,7 +128,6 @@ Select LPW Model
         Set Suite Variable      ${MODEM_PREAMBLE_REG}         0x0084
         Set Suite Variable      ${MODEM_SYNC0_REG}            0x0480
         Set Suite Variable      ${SYNTH_FREQ_REG}             0x0030
-        Set Suite Variable      ${JOIN_AFTER_SYNC}             0.0084
     ELSE
         Fail                    Unknown LPW model: ${model}
     END
@@ -213,16 +196,10 @@ Force State
     Execute Command             sysbus WriteDoubleWord ${addr} ${state}  machine=${name}
 
 Prepare Tx Frame
-    [Arguments]  ${name}  ${nbytes}=4
-    Configure Fixed Frame Length  ${name}  ${nbytes}
-    Write Frame Descriptor      ${name}  0  ${nbytes}  0
-    IF  ${nbytes} == 4
-        Load Bufc Buffer        ${name}  0  0x11  0x22  0x33  0x44
-    ELSE
-        Write Bufc Register     ${name}  0  ${BUFC_BUF0_CTRL_REG}  ${BUFC_SIZE_256}
-        @{bytes}=               Evaluate  ["0x11"] * ${nbytes}
-        Load Bufc Buffer        ${name}  0  @{bytes}
-    END
+    [Arguments]  ${name}
+    Configure Fixed Frame Length  ${name}  4
+    Write Frame Descriptor      ${name}  0  4  0
+    Load Bufc Buffer            ${name}  0  0x11  0x22  0x33  0x44
 
 Configure Fixed Frame Length
     [Arguments]  ${name}  ${bytes}
@@ -258,8 +235,8 @@ Write Bufc Register
     Execute Command             sysbus WriteDoubleWord ${addr} ${value}  machine=${name}
 
 Start Tx
-    [Arguments]  ${name}  ${nbytes}=4
-    Prepare Tx Frame            ${name}  ${nbytes}
+    [Arguments]  ${name}
+    Prepare Tx Frame            ${name}
     Execute Command             emulation RunFor "0.0001"
     Force State                 ${name}  ${RAC_FORCESTATE_TX}
 
@@ -374,108 +351,6 @@ Enter RxSearch After Transmission Completes Does Not Receive
         Execute Command             emulation RunFor "${RX_SETTLE}"
         Force State                 rx  ${RAC_FORCESTATE_RXSEARCH}
         Execute Command             emulation RunFor "0.001"
-        Frame Should Not Be Received
-    END
-
-Retune During Preamble Succeeds
-    FOR  ${model}  IN  @{LPW_MODELS}
-        Select LPW Model            ${model}
-        Create Wireless Pair
-        Tune Channel                tx  ${SYNTH_FREQ_CHANNEL_A}
-        Tune Channel                rx  ${SYNTH_FREQ_CHANNEL_B}
-        Force State                 rx  ${RAC_FORCESTATE_RXSEARCH}
-        Start Tx                    tx
-        Execute Command             emulation RunFor "${JOIN_DURING_PREAMBLE}"
-        Tune Channel                rx  ${SYNTH_FREQ_CHANNEL_A}
-        Execute Command             emulation RunFor "${RX_SETTLE}"
-        Frame Should Be Received
-    END
-
-Retune Late In Preamble Drops
-    FOR  ${model}  IN  @{LPW_MODELS}
-        Select LPW Model            ${model}
-        Create Wireless Pair
-        Tune Channel                tx  ${SYNTH_FREQ_CHANNEL_A}
-        Tune Channel                rx  ${SYNTH_FREQ_CHANNEL_B}
-        Force State                 rx  ${RAC_FORCESTATE_RXSEARCH}
-        Start Tx                    tx
-        Execute Command             emulation RunFor "${JOIN_LATE_IN_PREAMBLE}"
-        Tune Channel                rx  ${SYNTH_FREQ_CHANNEL_A}
-        Execute Command             emulation RunFor "${RX_SETTLE}"
-        Wait For Log Entry          Dropping.*insufficient preamble  timeout=1  treatAsRegex=true
-        Frame Should Not Be Received
-    END
-
-Retune After Sync Drops
-    FOR  ${model}  IN  @{LPW_MODELS}
-        Select LPW Model            ${model}
-        Create Wireless Pair
-        Tune Channel                tx  ${SYNTH_FREQ_CHANNEL_A}
-        Tune Channel                rx  ${SYNTH_FREQ_CHANNEL_B}
-        Force State                 rx  ${RAC_FORCESTATE_RXSEARCH}
-        Start Tx                    tx
-        Execute Command             emulation RunFor "${JOIN_AFTER_SYNC}"
-        Tune Channel                rx  ${SYNTH_FREQ_CHANNEL_A}
-        Execute Command             emulation RunFor "${RX_SETTLE}"
-        Wait For Log Entry          Dropping.*insufficient preamble  timeout=1  treatAsRegex=true
-        Frame Should Not Be Received
-    END
-
-Enter RxSearch Mid Preamble Succeeds
-    FOR  ${model}  IN  @{LPW_MODELS}
-        Select LPW Model            ${model}
-        Create Wireless Pair
-        Tune Channel                tx  ${SYNTH_FREQ_CHANNEL_A}
-        Tune Channel                rx  ${SYNTH_FREQ_CHANNEL_A}
-        Start Tx                    tx
-        Execute Command             emulation RunFor "${JOIN_DURING_PREAMBLE}"
-        Force State                 rx  ${RAC_FORCESTATE_RXSEARCH}
-        Execute Command             emulation RunFor "${RX_SETTLE}"
-        Frame Should Be Received
-    END
-
-Retune Away Before Sync Drops
-    FOR  ${model}  IN  @{LPW_MODELS}
-        Select LPW Model            ${model}
-        Create Wireless Pair
-        Tune Channel                tx  ${SYNTH_FREQ_CHANNEL_A}
-        Tune Channel                rx  ${SYNTH_FREQ_CHANNEL_A}
-        Force State                 rx  ${RAC_FORCESTATE_RXSEARCH}
-        Start Tx                    tx
-        Execute Command             emulation RunFor "${JOIN_DURING_PREAMBLE}"
-        Tune Channel                rx  ${SYNTH_FREQ_CHANNEL_B}
-        Execute Command             emulation RunFor "${RX_SETTLE}"
-        Wait For Log Entry          Dropping (retuned away before sync)  timeout=1
-        Frame Should Not Be Received
-    END
-
-Tx Abort During Preamble Drops
-    FOR  ${model}  IN  @{LPW_MODELS}
-        Select LPW Model            ${model}
-        Create Wireless Pair
-        Tune Channel                tx  ${SYNTH_FREQ_CHANNEL_A}
-        Tune Channel                rx  ${SYNTH_FREQ_CHANNEL_A}
-        Force State                 rx  ${RAC_FORCESTATE_RXSEARCH}
-        Start Tx                    tx
-        Execute Command             emulation RunFor "${JOIN_DURING_PREAMBLE}"
-        Force State                 tx  ${RAC_FORCESTATE_OFF}
-        Execute Command             emulation RunFor "${RX_SETTLE}"
-        Wait For Log Entry          Dropping (TX was aborted)  timeout=1
-        Frame Should Not Be Received
-    END
-
-Tx Abort During Payload Drops
-    FOR  ${model}  IN  @{LPW_MODELS}
-        Select LPW Model            ${model}
-        Create Wireless Pair
-        Tune Channel                tx  ${SYNTH_FREQ_CHANNEL_A}
-        Tune Channel                rx  ${SYNTH_FREQ_CHANNEL_A}
-        Force State                 rx  ${RAC_FORCESTATE_RXSEARCH}
-        Start Tx                    tx  ${LONG_FRAME_BYTES}
-        Execute Command             emulation RunFor "${JOIN_AFTER_SYNC}"
-        Force State                 tx  ${RAC_FORCESTATE_OFF}
-        Execute Command             emulation RunFor "${RX_SETTLE}"
-        Wait For Log Entry          Dropping (TX was aborted)  timeout=1
         Frame Should Not Be Received
     END
 

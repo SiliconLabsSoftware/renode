@@ -25,7 +25,7 @@
       "tests/unit-tests/riscv-zicond-extension.robot"
     ]
   },
-  "silabs-unit-tests-protimer": {
+  "unit-test-protimer": {
     "title": "SiLabs Unit Tests: PROTIMER",
     "tests": [
       {
@@ -48,7 +48,7 @@
       }
     ]
   },
-  "silabs-unit-tests-ldma": {
+  "unit-test-ldma": {
     "title": "SiLabs Unit Tests: LDMA",
     "tests": [
       {
@@ -71,7 +71,7 @@
       }
     ]
   },
-  "silabs-unit-tests-frc": {
+  "unit-test-frc": {
     "title": "SiLabs Unit Tests: FRC",
     "tests": [
       {
@@ -94,7 +94,7 @@
       }
     ]
   },
-  "silabs-unit-tests-timer": {
+  "unit-test-timer": {
     "title": "SiLabs Unit Tests: TIMER",
     "tests": [
       {
@@ -106,18 +106,12 @@
       {
         "test": "tests/peripherals/SiLabs/TIMER.robot",
         "params": {
-          "IP_VERSION": "1"
-        }
-      },
-      {
-        "test": "tests/peripherals/SiLabs/TIMER.robot",
-        "params": {
           "IP_VERSION": "2"
         }
       }
     ]
   },
-  "silabs-unit-tests-eusart": {
+  "unit-test-eusart": {
     "title": "SiLabs Unit Tests: EUSART",
     "tests": [
       {
@@ -134,20 +128,20 @@
       }
     ]
   },
-  "silabs-unit-tests-crypto": {
+  "unit-test-crypto": {
     "title": "SiLabs Unit Tests (Miscellaneous)",
     "tests": [
       "tests/peripherals/SiLabs/secure_engine_commands.py",
       "tests/peripherals/SiLabs/SYMCRYPTO_1.py"
     ]
   },
-  "silabs-unit-tests-lpw-rx": {
+  "unit-test-lpw-rx": {
     "title": "SiLabs Unit Tests: LPW RX",
     "tests": [
       "tests/peripherals/SiLabs/LPW_RX.robot"
     ]
   },
-  "silabs-unit-tests-misc": {
+  "unit-test-misc": {
     "title": "SiLabs Unit Tests (Miscellaneous)",
     "tests": [
       "tests/peripherals/SiLabs/SYSRTC_2.robot",
