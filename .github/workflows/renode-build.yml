@@ -44,7 +44,7 @@ jobs:
         run: ./r dist-zip
 
       - name: 📤 Upload dist artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dist
           path: dist.zip
@@ -91,7 +91,7 @@ jobs:
         run: ./r build-host-library
 
       - name: 📥 Download dist artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: dist
 
