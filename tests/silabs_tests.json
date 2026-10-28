@@ -1,6 +1,6 @@
 {
-  "antmicro": {
-    "title": "Antmicro",
+  "core-unit-tests": {
+    "title": "Core Unit Tests",
     "tests": [
       "tests/example.robot",
       "tests/unit-tests/array_memory.robot",
@@ -21,6 +21,19 @@
       "tests/unit-tests/riscv-unit-tests.robot",
       "tests/unit-tests/robot-integration.robot",
       "tests/unit-tests/virtual-time.robot"
+    ]
+  },
+  "railtest-xg22": {
+    "title": "RailTest xG22",
+    "tests": [
+      {
+        "test": "tests/platforms/SiLabs/railtest.py",
+        "params": {
+          "BOARD": "brd4182a",
+          "UART": "eusart0",
+          "ELF": "https://github.com/SiliconLabsSoftware/renode/releases/download/firmware-dev/xg22_railtest_10_14_26.out"
+        }
+      }
     ]
   }
 }
