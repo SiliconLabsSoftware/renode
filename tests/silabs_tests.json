@@ -129,7 +129,7 @@
     ]
   },
   "unit-test-crypto": {
-    "title": "SiLabs Unit Tests (Miscellaneous)",
+    "title": "SiLabs Unit Tests (Crypto)",
     "tests": [
       "tests/peripherals/SiLabs/secure_engine_commands.py",
       "tests/peripherals/SiLabs/SYMCRYPTO_1.py"
