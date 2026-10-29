@@ -5,7 +5,7 @@ from common import openthread_lib
 # Globals
 ################################################
 
-QUANTUM_TIME = 0.000050
+QUANTUM_TIME = 0.000020
 CSL_PERIOD = 500000
 CSL_TIMEOUT = 30
 PROMPT = "> "

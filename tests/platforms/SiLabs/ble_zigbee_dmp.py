@@ -6,7 +6,7 @@ import test_lib
 # Globals
 ################################################
 
-QUANTUM_TIME = 0.000015
+QUANTUM_TIME = 0.000010
 PROMPT = "DMPLight>"
 PAN_ID = 0xABCD
 POWER = 0

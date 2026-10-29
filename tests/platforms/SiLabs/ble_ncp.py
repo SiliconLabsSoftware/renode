@@ -5,7 +5,7 @@ from common import bgapi_lib
 # Globals
 ################################################
 
-QUANTUM_TIME = 0.000020
+QUANTUM_TIME = 0.000010
 DEBUG = True
 
 ################################################
@@ -64,7 +64,7 @@ test_lib.delay(1)
 bgapi_lib.assert_no_connection_closed_event(host1)
 bgapi_lib.assert_no_connection_closed_event(host2)
 
-# RENODE-517: xG22 requires missing CRYPTOACC3_PKCTRL block.
+# TODO: xG22 requires missing CRYPTOACC3_PKCTRL block.
 if (board != "brd4182a"):
     bgapi_lib.cmd_increase_security(host2, node2_conn_handle)
     bgapi_lib.wait_for_security_increased_events(host1)

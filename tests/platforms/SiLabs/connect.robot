@@ -1,10 +1,10 @@
 *** Variables ***
 # The ELF variable must be set from command line to the Connect MAC Mode elf file to be used. 
 # For example: renode-test --variable ELF:path_to_elf_file/connect_soc_mac_mode_device.out this_test.robot
-${URI}                          @https://artifactory.silabs.net/artifactory/renode-production/prebuilt/xg24
+${URI}                          @https://github.com/SiliconLabsSoftware/renode/releases/download/firmware-dev/xg24_connect_soc_mac_mode_device_3_4_25.out
 ${ELF}                          ${URI}/connect_soc_mac_mode_device.out
 ${BOARD}                        brd4186c
-${QUANTUM_TIME}                 0.000050
+${QUANTUM_TIME}                 0.000020
 ${RNG_SEED}                     0
 ${UART}                         usart0
 ${DEFAULT_UART_TIMEOUT}         5
