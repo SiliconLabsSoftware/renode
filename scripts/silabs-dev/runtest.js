@@ -8,13 +8,13 @@ const renode = require('./renode')
 
 let tests = require('../../tests/silabs_tests.json')
 
-const SILABS_UNIT_TESTS_GROUP_PREFIX = 'silabs-unit-tests-group'
+const SILABS_UNIT_TESTS_GROUP_PREFIX = 'unit-test-'
 
 function availableSuiteNames() {
   return Object.keys(tests)
 }
 
-/** Leaf JSON keys, or all silabs-unit-tests-group* keys when the name is the local `silabs` alias. */
+/** Leaf JSON keys, or all unit-test-* keys when the name is the local `silabs` alias. */
 function resolveSuiteNames(suiteName) {
   if (suiteName in tests) {
     return [suiteName]
