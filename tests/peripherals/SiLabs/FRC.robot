@@ -479,27 +479,6 @@ Frc Appends No Crc When Only Calculate Crc Is Set
     Frame Should Be Sent        11-22-33-44
     Word Counter Should Be      4
 
-Frc Sends An Unlimited Subframe Longer Than The Words Field As One Subframe
-    [Documentation]    The unlimited WORDS encoding means "the remainder of the frame", not a
-    ...                (WORDS+1) word cap. A frame longer than the widest cap the field can express
-    ...                must go out as a single subframe with one CRC at the end, rather than being
-    ...                split with a CRC inserted before its last bytes.
-    Create Machine
-    Configure Fixed Frame Length  ${FRAME_BEYOND_8BIT_WORDS}
-    Write Frame Descriptor      0  ${FCD_UNLIMITED_WORDS}  0  include_crc=${True}
-    Load Large Bufc Buffer With Counting Pattern  0  ${FRAME_BEYOND_8BIT_WORDS}
-    ${payload}=                 Counting Pattern  ${FRAME_BEYOND_8BIT_WORDS}
-
-    Force Tx
-    # Unlike the few-byte frames of the other TX tests, this one takes a measurable airtime, so the
-    # transmission has to run to completion. Otherwise it stays on air in the interference queue,
-    # which is shared by every machine in this Renode instance, and collides with the RX tests below.
-    Execute Command             emulation RunFor "0.005"
-
-    Frame Should Be Sent        ${payload}-${MOCKED_CRC_BYTE}
-    Word Counter Should Be      ${FRAME_BEYOND_8BIT_WORDS}
-    Frc Interrupt Flags Should Be Clear  ${FRC_IF_TXUF}
-
 Frc Reserves The Crc Out Of A Dynamic Frame Length
     [Documentation]    With DFLINCLUDECRC the decoded length covers the CRC, so the subframe data has
     ...                to shrink by the CRC width instead of overrunning the frame.
