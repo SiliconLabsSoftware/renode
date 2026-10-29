@@ -1,8 +1,10 @@
 // This script is used to run test suites defined in tests/silabs_tests.json. It can be invoked with a specific suite name or with the --matrix flag to output a JSON configuration for GitHub Actions matrix strategy.
 
+const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { execFileSync } = require('child_process')
+const renode = require('./renode')
 
 let tests = require('../../tests/silabs_tests.json')
 
@@ -30,6 +32,25 @@ function printAvailableSuites() {
     'Available suites:',
     [...availableSuiteNames(), 'silabs'].join(', '),
   )
+}
+
+/** Prefer the venv from `./r testing-set-up` when it exists. */
+function pythonExecutable() {
+  let candidate = renode.venvPython()
+  return fs.existsSync(candidate) ? candidate : 'python3'
+}
+
+/** Put the test venv on PATH so renode-test's python3 sees installed packages. */
+function withVenv(env) {
+  let binDir = renode.venvBinDir()
+  if (!fs.existsSync(binDir)) {
+    return env
+  }
+  return {
+    ...env,
+    VIRTUAL_ENV: renode.venvDir(),
+    PATH: `${binDir}${path.delimiter}${env.PATH || ''}`,
+  }
 }
 
 /** Quote one argv token for safe copy-paste into a POSIX shell. */
@@ -153,11 +174,13 @@ function runSuite(suiteName) {
             PYRENODE_BIN: renodeFile,
           }
         }
+        theEnv = withVenv(theEnv)
+        let python = pythonExecutable()
         let pythonEnvLog = process.env.RENODE_PORTABLE_LOCATION
           ? { PYRENODE_BIN: theEnv.PYRENODE_BIN }
           : { PYRENODE_BUILD_DIR: rootDir }
-        logInvokedCommand('python3', args, pythonEnvLog)
-        execFileSync('python3', args, {
+        logInvokedCommand(python, args, pythonEnvLog)
+        execFileSync(python, args, {
           stdio: 'inherit',
           env: theEnv,
         })
@@ -181,8 +204,12 @@ function runSuite(suiteName) {
           }
         }
         args.push(testPath)
+        let robotEnv = withVenv(process.env)
         logInvokedCommand(testRunner, args, {})
-        execFileSync(testRunner, args, { stdio: 'inherit' })
+        execFileSync(testRunner, args, {
+          stdio: 'inherit',
+          env: robotEnv,
+        })
       }
     } catch (err) {
       let elapsed = Date.now() - testStart

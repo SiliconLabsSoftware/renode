@@ -101,7 +101,14 @@ jobs:
       - name: 🔨 Prepare dist artifact.
         run: ./r dist-prep
 
-      # Pip dependencies for tests (pyrenode3, pybgapi, test_lib), installed and verified in testing-set-up
+      # ubuntu-latest Python is PEP 668 externally managed, so system pip3
+      # install fails. This interpreter can create .venv; testing-set-up
+      # installs pyrenode3, pybgapi, and test_lib into that venv.
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
       - name: 🪚 Set up testing infrastructure.
         run: ./r testing-set-up
 

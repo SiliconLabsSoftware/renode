@@ -175,27 +175,50 @@ function buildHostLibrary() {
   })
 }
 
+function venvDir() {
+  return path.join(rootDir, '.venv')
+}
+
+function venvBinDir() {
+  return path.join(venvDir(), 'bin')
+}
+
+function venvPython() {
+  return path.join(venvBinDir(), 'python3')
+}
+
+// Install into a venv. ubuntu-latest (and other PEP 668 hosts) reject pip
+// installs into the system interpreter with externally-managed-environment.
 function testingSetUp() {
+  console.log('   ✳️ Create virtual environment')
+  execFileSync('python3', ['-m', 'venv', venvDir()], {
+    cwd: rootDir,
+    stdio: 'inherit',
+  })
   const pipOpts = { cwd: rootDir, stdio: 'inherit' }
+  const pip = (args) =>
+    execFileSync(venvPython(), ['-m', 'pip', ...args], pipOpts)
+
   console.log('   ✳️ Upgrade pip')
-  execFileSync('pip3', ['install', '--upgrade', 'pip'], pipOpts)
+  pip(['install', '--upgrade', 'pip'])
   console.log('   ✳️ Standard renode requirements.')
-  execFileSync('pip3', ['install', '-r', 'tests/requirements.txt'], pipOpts)
+  pip(['install', '-r', 'tests/requirements.txt'])
   console.log('   ✳️ Pyrenode3 package for testing.')
-  execFileSync(
-    'pip3',
-    [
-      'install',
-      'pyrenode3[all] @ git+https://github.com/antmicro/pyrenode3.git',
-    ],
-    pipOpts,
-  )
+  pip([
+    'install',
+    'pyrenode3[all] @ git+https://github.com/antmicro/pyrenode3.git',
+  ])
   console.log('   ✳️ SiLabs test_lib package.')
-  execFileSync('pip3', ['install', '-e', testLibDir], pipOpts)
+  pip(['install', '-e', testLibDir])
   console.log('   ✳️ Verify test_lib pip installation.')
-  execFileSync('pip3', ['show', 'test_lib'], pipOpts)
+  pip(['show', 'test_lib'])
   console.log('   ✳️ bgapi package.')
-  execFileSync('pip3', ['install', 'pybgapi==1.3.*'], pipOpts)
+  pip(['install', 'pybgapi==1.3.*'])
+
+  // Later job steps (including renode-test) resolve python3 from PATH.
+  if (process.env.GITHUB_PATH) {
+    fs.appendFileSync(process.env.GITHUB_PATH, `${venvBinDir()}\n`)
+  }
 }
 
 exports.buildHostLibrary = buildHostLibrary
@@ -205,6 +228,9 @@ exports.buildWinRenode = buildWinRenode
 exports.cleanRenode = cleanRenode
 exports.fetchLibraries = fetchLibraries
 exports.testingSetUp = testingSetUp
+exports.venvDir = venvDir
+exports.venvBinDir = venvBinDir
+exports.venvPython = venvPython
 exports.renodeVersion = renodeVersion
 exports.silabsRenodeVersion = silabsRenodeVersion
 exports.silabsVersion = silabsVersion
