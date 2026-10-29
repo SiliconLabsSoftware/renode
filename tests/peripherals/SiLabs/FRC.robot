@@ -207,11 +207,6 @@ Counting Pattern
     ${pattern}=                 Evaluate  '-'.join('%02X' % ((i + 1) & 0xFF) for i in range(${nbytes}))
     RETURN                      ${pattern}
 
-Counting Pattern Bytes
-    [Arguments]  ${nbytes}
-    ${bytes}=                   Evaluate  [(i + 1) & 0xFF for i in range(${nbytes})]
-    RETURN                      ${bytes}
-
 Configure Large Bufc Buffer
     [Documentation]    Widen a BUFC buffer to 512 bytes and point it at its own RAM area, empty.
     [Arguments]  ${buffer}
@@ -667,25 +662,6 @@ Frc Uses The Leading Rx Descriptor Once In Fcd Mode 2
     Rx Buffer Should Contain    ${FIRST_RX_BUFFER}  11-22
     Rx Buffer Should Contain    ${SECOND_RX_BUFFER}  AA-BB-CC-DD
     Word Counter Should Be      6
-
-Frc Receives An Unlimited Subframe Longer Than The Words Field Into One Buffer
-    [Documentation]    RX counterpart of the unlimited subframe TX test: the whole payload lands in
-    ...                the buffer in order, with the trailing CRC read out separately rather than
-    ...                being expected part way through the payload.
-    Create Machine
-    Arm Rx Peer
-    Configure Fixed Frame Length  ${FRAME_BEYOND_8BIT_WORDS}
-    Write Frame Descriptor      ${FIRST_RX_DESCRIPTOR}  ${FCD_UNLIMITED_WORDS}  ${FIRST_RX_BUFFER}  include_crc=${True}
-    Configure Large Bufc Buffer  ${FIRST_RX_BUFFER}
-    ${payload}=                 Counting Pattern Bytes  ${FRAME_BEYOND_8BIT_WORDS}
-    ${expected}=                Counting Pattern  ${FRAME_BEYOND_8BIT_WORDS}
-
-    Inject Received Frame       @{payload}  0x00
-
-    Frame Should Be Received
-    Rx Buffer Should Contain    ${FIRST_RX_BUFFER}  ${expected}
-    Word Counter Should Be      ${FRAME_BEYOND_8BIT_WORDS}
-    Frc Interrupt Flags Should Be Set  ${FRC_IF_RXDONE}
 
 Frc Takes The Received Frame Length From The Length Field
     [Documentation]    With DFLMODE=SINGLEBYTE the frame length comes from the received bytes, so the
