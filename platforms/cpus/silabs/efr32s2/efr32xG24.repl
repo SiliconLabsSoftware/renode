@@ -182,14 +182,14 @@ timer0: Timers.SiLabs_TIMER_1 @ {
         sysbus <0x40048000, +0x4000>; // TIMER0_S
         sysbus <0x50048000, +0x4000>  // TIMER0_NS
     }
-    width: 16
+    width: 32
     -> nvic@4
 
 timer1: Timers.SiLabs_TIMER_1 @ {
         sysbus <0x4004C000, +0x4000>; // TIMER1_S
         sysbus <0x5004C000, +0x4000>  // TIMER1_NS
     }
-    width: 16
+    width: 32
     -> nvic@5
 
 ldma: DMA.SiLabs_LDMA_0_3 @ {

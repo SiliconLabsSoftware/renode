@@ -108,7 +108,8 @@
         "params": {
           "IP_VERSION": "2"
         }
-      }
+      },
+      "tests/peripherals/SiLabs/TIMER_1_width.robot"
     ]
   },
   "unit-test-eusart": {
