@@ -4,9 +4,13 @@ using "platforms/cpus/zynqmp.repl"
 uart2: UART.Cadence_UART @ sysbus 0xff080000
     -> apuGic@48
 
-// VirtIO disk for matter tools
+// VirtIO disk for matter tools (python, OTBR, BlueZ, chip-tool)
 matter_virtio: Storage.VirtIOBlockDevice @ sysbus 0xfe400200
     IRQ -> apuGic@33
+
+// VirtIO disk for matter_support/provision.
+provision_virtio: Storage.VirtIOBlockDevice @ sysbus 0xfe400400
+    IRQ -> apuGic@34
 
 // The ZynqMP platform provides GEM MACs but only gives gem0 a PHY.
 // Attach a PHY to gem3 so Linux can discover a link on its MDIO bus.
