@@ -16,10 +16,20 @@ else()
     message(FATAL_ERROR "Unknown RENODE_API_TRANSPORT '${RENODE_API_TRANSPORT}', expected 'socket' or 'in_process'")
 endif()
 
-add_library(renode_api STATIC
+set(renode_api_sources
     ${CMAKE_CURRENT_LIST_DIR}/renode_api.c
     ${CMAKE_CURRENT_LIST_DIR}/${transport_source}
+    ${CMAKE_CURRENT_LIST_DIR}/silabs_time.c
     )
+
+# The host-library build passes -DCMAKE_BUILD_SHARED_LIBS=ON so silabs_time.c
+# can interpose clock_gettime and gettimeofday. A plain add_library() would
+# ignore that variable because CMake only honors BUILD_SHARED_LIBS.
+if(CMAKE_BUILD_SHARED_LIBS)
+    add_library(renode_api SHARED ${renode_api_sources})
+else()
+    add_library(renode_api STATIC ${renode_api_sources})
+endif()
 
 target_compile_options(renode_api
     PRIVATE

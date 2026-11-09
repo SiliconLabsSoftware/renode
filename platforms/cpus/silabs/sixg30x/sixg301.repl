@@ -152,6 +152,9 @@ seqacc: Miscellaneous.SiLabs.SiLabs_SEQACC_1 @ {
 
 itm : Miscellaneous.SiLabs.SiLabs_ITM @ sysbus 0xE0000000
 
+dwt: Miscellaneous.DWT @ sysbus 0xE0001000
+    frequency: 38400000
+
 timer0: Timers.SiLabs_TIMER_2 @ {
         sysbus <0x40848000, +0x4000>; // TIMER0_NS
         sysbus <0x50848000, +0x4000>  // TIMER0_S

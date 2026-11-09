@@ -312,6 +312,9 @@ flashuserdata: Miscellaneous.SiLabs.SiLabs_FlashUserData @ sysbus <0x0FE00000, +
 
 itm : Miscellaneous.SiLabs.SiLabs_ITM @ sysbus 0xE0000000
 
+dwt: Miscellaneous.DWT @ sysbus 0xE0001000
+    frequency: 39000000
+
 sysbus:
     init add:
         Tag <0x40000000, 0x40003FFF> "SCRATCHPAD_S"
