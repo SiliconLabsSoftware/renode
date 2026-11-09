@@ -13,6 +13,8 @@ Supported development boards include:
 * EFR32xG26: 4116a, 4117a, 4118a, 4120a, 4121a
 * SixG301: 1019a, 4407a
 
+See the [Silicon Labs device model feature matrix](docs/silabs-device-feature-matrix.md) for modeled peripherals, radio behavior, and known limitations on xG24, xG26, and SixG301.
+
 ## What is Renode?
 
 Renode was created by Antmicro as a virtual development tool for multi-node embedded networks (both wired and wireless) and is intended to enable a scalable workflow for creating effective, tested and secure IoT systems.
