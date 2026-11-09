@@ -75,4 +75,6 @@ else
     RENODE_DLL="$RENODE_DIR/Renode.dll"
 fi
 
-${TRACE_COMMAND} dotnet "$RENODE_DLL" "${PARAMS[@]:-}"
+# exec rather than a plain call: otherwise this wrapper stays alive as the parent of dotnet, and
+# anything that kills the wrapper orphans the emulator, which keeps running and holding its sockets.
+exec ${TRACE_COMMAND} dotnet "$RENODE_DLL" "${PARAMS[@]:-}"
