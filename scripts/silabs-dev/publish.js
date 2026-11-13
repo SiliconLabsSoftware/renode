@@ -64,7 +64,6 @@ function createDist(skipFetchLibraries = false) {
   var args = ['-t']
   if (skipFetchLibraries) {
     args.push('--skip-fetch')
-    args.push('--net')
   }
   execFileSync('./build.sh', args, {
     cwd: rootDir,

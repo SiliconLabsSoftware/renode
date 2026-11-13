@@ -34,7 +34,10 @@ namespace Antmicro.Renode.RobotFramework
             if(Thread.CurrentThread != listenerThread)
             {
                 listener?.Close();
-                listenerThread.Join();
+                if(listenerThread.IsAlive)
+                {
+                    listenerThread.Join();
+                }
             }
         }
 
@@ -54,11 +57,13 @@ namespace Antmicro.Renode.RobotFramework
             if(!TryStartListener(out listener, out var actualPort, minPort, maxPort))
             {
                 Logger.Log(LogLevel.Error, "Could not start the HTTP server on {0}", selectAnyPort ? "any port" : $"port {port}");
+                Environment.ExitCode = 1;
                 return;
             }
 
             if(!TryCreatePortFile(actualPort))
             {
+                Environment.ExitCode = 1;
                 return;
             }
 
@@ -93,16 +98,18 @@ namespace Antmicro.Renode.RobotFramework
 
         private bool TryStartListener(out HttpListener listener, out int port, int minPort, int maxPort)
         {
+            // Serve under the path that `renode-test` gives each Renode, so a call meant for another Renode gets 404.
+            var path = Environment.GetEnvironmentVariable("RENODE_ROBOT_SERVER_PATH") ?? "";
             for(port = minPort; port <= maxPort; port++)
             {
                 listener = new HttpListener();
                 if(RuntimeInfo.IsWindows())
                 {
-                    listener.Prefixes.Add($"http://localhost:{port}/");
+                    listener.Prefixes.Add($"http://localhost:{port}/{path}");
                 }
                 else
                 {
-                    listener.Prefixes.Add($"http://*:{port}/");
+                    listener.Prefixes.Add($"http://*:{port}/{path}");
                 }
                 try
                 {

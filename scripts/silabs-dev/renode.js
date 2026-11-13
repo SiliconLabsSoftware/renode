@@ -76,7 +76,7 @@ function buildRenode() {
     ...process.env,
     OPENSSL_ENABLE_SHA1_SIGNATURES: '1',
   }
-  execFileSync(path.join(rootDir, 'build.sh'), ['--skip-fetch', '--net'], {
+  execFileSync(path.join(rootDir, 'build.sh'), ['--skip-fetch'], {
     cwd: rootDir,
     stdio: 'inherit',
     env,

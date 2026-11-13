@@ -42,13 +42,6 @@ namespace Antmicro.Renode.WebSockets.Providers
             return true;
         }
 
-        [WebSocketAPIAction("spawn", "1.5.0")]
-        private WebSocketAPIResponse SpawnAction(string _, bool __)
-        {
-            SharedData.MainConnection = SharedData.CurrentConnection;
-            return WebSocketAPIUtils.CreateEmptyActionResponse();
-        }
-
         [WebSocketAPIAction("kill", "1.5.0")]
         private WebSocketAPIResponse KillAction(string _)
         {
@@ -286,7 +279,6 @@ namespace Antmicro.Renode.WebSockets.Providers
 
                 CANCreatedEvent.RaiseEvent(new CANCreatedEventDto
                 {
-                    Port = (int)webSocketCANAnalyzer.CANNumber,
                     HubName = EmulationManager.Instance.CurrentEmulation.ExternalsManager.TryGetName(canHub, out var hubName) ? hubName : ""
                 });
             }
@@ -296,12 +288,11 @@ namespace Antmicro.Renode.WebSockets.Providers
                 var spiController = webSocketSPIAnalyzer.SPIController;
                 var machine = spiController.GetMachine();
                 var machineName = EmulationManager.Instance.CurrentEmulation[machine];
-                var spiName = GPIOData.GetPeripheralFullName(spiController);
+                var spiName = machine.GetAnyNameOrTypeName(spiController);
 
                 SPIOpenedEvent.RaiseEvent(new SPICreatedEventDto
                 {
                     Name = spiName,
-                    Port = webSocketSPIAnalyzer.SPINumber,
                     MachineName = machineName
                 });
             }
@@ -407,8 +398,6 @@ namespace Antmicro.Renode.WebSockets.Providers
 
         private class CANCreatedEventDto
         {
-            [JsonProperty("port")]
-            public int Port;
             [JsonProperty("hubName")]
             public string HubName;
         }
@@ -439,8 +428,6 @@ namespace Antmicro.Renode.WebSockets.Providers
 
         private class SPICreatedEventDto
         {
-            [JsonProperty("port")]
-            public int Port;
             [JsonProperty("name")]
             public string Name;
             [JsonProperty("machineName")]

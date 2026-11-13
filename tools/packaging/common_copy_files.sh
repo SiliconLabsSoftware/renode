@@ -14,6 +14,7 @@ cp -r $BASE/tests/platforms $DIR/tests/platforms
 cp -r $BASE/tests/{robot_tests_provider,run_tests,tests_engine,robot_output_formatter,robot_output_formatter_verbose,helper,retry_and_timeout_listener,segmenting,monitoring,unstable_tests,state_dependency_listener}.py $DIR/tests
 cp -r $BASE/tests/{renode-keywords,example}.robot $DIR/tests
 cp -r $BASE/tests/tools $DIR/tests/tools
+cp -r $BASE/tests/test_lib $DIR/tests/test_lib
 cp -r $BASE/tests/tests.yaml $DIR/tests/tests.yaml
 
 cp -r $BASE/{.renode-root,scripts,platforms} $DIR

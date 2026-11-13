@@ -14,7 +14,6 @@ export interface UartOpenedArgs {
 export type UartOpenedCallback = (event: UartOpenedArgs) => void;
 
 export interface CanOpenedArgs {
-  port: number;
   hubName: string;
 }
 export type CanOpenedCallback = (event: CanOpenedArgs) => void;
@@ -46,7 +45,6 @@ export type DisplayOpenedCallback = (event: DisplayOpenedArgs) => void;
 
 export const SpiOpened = 'spi-opened';
 export interface SpiOpenedArgs {
-  port: number;
   name: string;
   machineName: string;
 }

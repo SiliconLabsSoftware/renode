@@ -3,7 +3,7 @@ Resource                      ${RENODEKEYWORDS}
 Resource                      common_keywords.robot
 
 *** Comments ***
-PROTIMER capture/compare tests shared by the xG22, xG24, xG301, and SIWG353 LPW models.
+PROTIMER capture/compare tests shared by the xG22, xG24 and xG301 LPW models.
 
 A channel with BASEMATCHEN and WRAPMATCHEN represents one compound timestamp comparison. Both
 counter words must match on the same tick. Series 2 models use a 16-bit BASECNT and a different
@@ -12,10 +12,10 @@ register layout from Series 3, so Configure LPW Model supplies model-specific ad
 The cross-wrap tests shrink BASECNTTOP to 0xFF so WRAPCNT advances during a short test run.
 
 *** Variables ***
-# The LPW_MODEL variable selects the model under test: xg22, xg24, xg301 or siwg353.
+# The LPW_MODEL variable selects the model under test: xg22, xg24 or xg301.
 # It should be set from the command line to cover a model other than the default:
 # renode-test --variable LPW_MODEL:xg22 this_test.robot
-${LPW_MODEL}                   siwg353
+${LPW_MODEL}                   xg301
 
 ${PROTIMER_CTRL_REG}          0x0008
 ${PROTIMER_CMD_REG}           0x000C
@@ -37,9 +37,6 @@ Configure LPW Model
         Configure Series 2 Registers
     ELSE IF  '${LPW_MODEL}' == 'xg301'
         Set Suite Variable     ${PLATFORM_FILE}             platforms/boards/silabs/brd1019a.repl
-        Configure Series 3 Registers
-    ELSE IF  '${LPW_MODEL}' == 'siwg353'
-        Set Suite Variable     ${PLATFORM_FILE}             platforms/boards/silabs/brd1025c.repl
         Configure Series 3 Registers
     ELSE
         Fail                   Unsupported LPW_MODEL: ${LPW_MODEL}

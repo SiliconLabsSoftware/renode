@@ -16,7 +16,7 @@ permissions:
 jobs:
   build:
     name: 🐧 Renode Build
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository_owner == 'SiliconLabsSoftware' && 'ubuntu-latest' || fromJSON('["prod","ubuntu","stable","medium","boston"]') }}
     env:
       DOTNET_INSTALL_DIR: '.dotnet-install'
       PYRENODE_RUNTIME: 'coreclr'
@@ -61,15 +61,51 @@ jobs:
       - name: ⚒️ Zip up the distribution package directory.
         run: ./r dist-zip
 
-      - name: 📤 Upload dist artifact
+      - name: 📤 Upload distribution package (GitHub Artifacts)
+        if: github.repository_owner != 'SiliconLabsInternal'
         uses: actions/upload-artifact@v6
         with:
           name: dist
           path: dist.zip
+          overwrite: true
+
+      # curl, not uses: GitHub resolves every uses: while loading the workflow,
+      # before if, and SiliconLabsSoftware cannot see SiliconLabsInternal/actions.
+      - name: 📤 Upload distribution package (Artifactory)
+        if: github.repository_owner == 'SiliconLabsInternal'
+        env:
+          JF_URL: https://artifactory.silabs.net/artifactory
+          JF_REPOSITORY: sw-arch-generic-tools
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --header "X-JFrog-Art-Api: ${JF_ACCESS_TOKEN}" \
+            --upload-file dist.zip \
+            "${JF_URL}/${JF_REPOSITORY}/renode-temp/${GITHUB_RUN_ID}/dist.zip"
+
+      - name: 📤 Upload portable package
+        if: github.repository_owner == 'SiliconLabsInternal'
+        env:
+          JF_URL: https://artifactory.silabs.net/artifactory
+          JF_REPOSITORY: sw-arch-generic-tools
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          mapfile -t zips < <(find dist -maxdepth 1 -type f -name '*.zip' | sort)
+          if [ "${#zips[@]}" -ne 1 ]; then
+            echo "expected one zip in dist/, found ${#zips[@]}" >&2
+            printf '%s\n' "${zips[@]}" >&2
+            exit 1
+          fi
+          curl --fail --silent --show-error \
+            --header "X-JFrog-Art-Api: ${JF_ACCESS_TOKEN}" \
+            --upload-file "${zips[0]}" \
+            "${JF_URL}/${JF_REPOSITORY}/renode-temp/${GITHUB_RUN_ID}/renode.zip"
 
   create-test-matrix:
     name: 🧪 Create test matrix
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository_owner == 'SiliconLabsSoftware' && 'ubuntu-latest' || fromJSON('["prod","ubuntu","stable","medium","boston"]') }}
     outputs:
       test-matrix: ${{ steps.set-matrix.outputs.matrix-config }}
     steps:
@@ -100,7 +136,7 @@ jobs:
 
   test:
     name: ⚗️ Test
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository_owner == 'SiliconLabsSoftware' && 'ubuntu-latest' || fromJSON('["prod","ubuntu","stable","medium","boston"]') }}
     needs: ['build', 'create-test-matrix']
     strategy:
       fail-fast: false
@@ -139,10 +175,24 @@ jobs:
       - name: 🔨 Build host library
         run: ./r build-host-library
 
-      - name: 📥 Download dist artifact
+      - name: 📥 Download distribution package (GitHub Artifacts)
+        if: github.repository_owner != 'SiliconLabsInternal'
         uses: actions/download-artifact@v7
         with:
           name: dist
+
+      - name: 📥 Download distribution package (Artifactory)
+        if: github.repository_owner == 'SiliconLabsInternal'
+        env:
+          JF_URL: https://artifactory.silabs.net/artifactory
+          JF_REPOSITORY: sw-arch-generic-tools
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --header "X-JFrog-Art-Api: ${JF_ACCESS_TOKEN}" \
+            --output dist.zip \
+            "${JF_URL}/${JF_REPOSITORY}/renode-temp/${GITHUB_RUN_ID}/dist.zip"
 
       - name: 🔨 Unzip dist artifact.
         run: ./r dist-unzip
@@ -150,9 +200,9 @@ jobs:
       - name: 🔨 Prepare dist artifact.
         run: ./r dist-prep
 
-      # ubuntu-latest Python is PEP 668 externally managed, so system pip3
-      # install fails. This interpreter can create .venv; testing-set-up
-      # installs pyrenode3, pybgapi, and test_lib into that venv.
+      # This Python can be PEP 668 externally managed, so system pip3 install
+      # fails. This interpreter can create .venv; testing-set-up installs
+      # pyrenode3, pybgapi, and test_lib into that venv.
       - name: 🐍 Set up Python
         uses: actions/setup-python@v6
         with:
@@ -176,4 +226,25 @@ jobs:
       - name: 🗑️ Clean up downloaded test binaries
         if: always()
         run: rm -f /tmp/renode_* || true
+
+  delete-dist:
+    name: 🗑️ Delete dist artifact
+    runs-on: ${{ github.repository_owner == 'SiliconLabsSoftware' && 'ubuntu-latest' || fromJSON('["prod","ubuntu","stable","medium","boston"]') }}
+    needs: [build, test]
+    if: always() && github.repository_owner != 'SiliconLabsInternal'
+    steps:
+      - name: 🗑️ Delete dist artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ids="$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+            --jq '.artifacts[] | select(.name == "dist") | .id')"
+          if [ -z "$ids" ]; then
+            echo "No dist artifact to delete."
+            exit 0
+          fi
+          for id in $ids; do
+            echo "Deleting artifact ${id}"
+            gh api --method DELETE "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}"
+          done
 

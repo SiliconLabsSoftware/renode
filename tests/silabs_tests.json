@@ -106,6 +106,12 @@
       {
         "test": "tests/peripherals/SiLabs/TIMER.robot",
         "params": {
+          "IP_VERSION": "1"
+        }
+      },
+      {
+        "test": "tests/peripherals/SiLabs/TIMER.robot",
+        "params": {
           "IP_VERSION": "2"
         }
       }
@@ -156,6 +162,20 @@
           "LPW_MODEL": "xg301"
         }
       }
+    ]
+  },
+  "unit-test-energy-modes": {
+    "title": "SiLabs Unit Tests (Energy Modes)",
+    "tests": [
+      "tests/peripherals/SiLabs/EM1P_xG22.robot",
+      "tests/peripherals/SiLabs/EM1P_xG24.robot",
+      {
+        "test": "tests/peripherals/SiLabs/EM1P_xG24.robot",
+        "params": {
+          "PLATFORM_FILE": "platforms/boards/silabs/brd4116a.repl"
+        }
+      },
+      "tests/peripherals/SiLabs/EM1P_SiXG301.robot"
     ]
   },
   "unit-test-misc": {

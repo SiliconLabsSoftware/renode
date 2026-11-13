@@ -15,7 +15,7 @@ receiver idle, incompatible PHY, sync mismatch, TX abort, retune-away, joining a
 packet is gone, and co-channel collisions.
 
 *** Variables ***
-# The LPW_MODEL variable selects the model under test: xg22, xg24, xg301 or siwg353.
+# The LPW_MODEL variable selects the model under test: xg22, xg24 or xg301.
 # Pass it from the command line to cover a model other than the default:
 # renode-test --variable LPW_MODEL:xg22 tests/peripherals/SiLabs/LPW_RX.robot
 ${LPW_MODEL}                   xg301
@@ -150,31 +150,6 @@ Select LPW Model
         Set Suite Variable      ${MODEM_SYNC0_REG}            0x0480
         Set Suite Variable      ${SYNTH_FREQ_REG}             0x0030
         Set Suite Variable      ${JOIN_AFTER_SYNC}             0.0084
-    ELSE IF  '${LPW_MODEL}' == 'siwg353'
-        Set Suite Variable      ${PLATFORM_FILE}              platforms/boards/silabs/board_everest.repl
-        Set Suite Variable      ${FRC_BLOCK_ADDRESS}          0xA0200000
-        Set Suite Variable      ${RAC_BLOCK_ADDRESS}          0xA0220000
-        Set Suite Variable      ${RAC_FORCESTATE_TX}          0x6
-        Set Suite Variable      ${BUFC_BLOCK_ADDRESS}         0xA0300000
-        Set Suite Variable      ${BUFC_BUF0_CTRL_REG}         0x0010
-        Set Suite Variable      ${BUFC_BUF0_ADDR_REG}         0x0014
-        Set Suite Variable      ${BUFC_BUF0_WRITEOFFSET_REG}  0x0018
-        Set Suite Variable      ${BUFC_BUF0_READOFFSET_REG}   0x001C
-        Set Suite Variable      ${TX_MODEM_BLOCK_ADDRESS}     0xA0280000
-        Set Suite Variable      ${RX_MODEM_BLOCK_ADDRESS}     0xA0214000
-        Set Suite Variable      ${SYNTH_BLOCK_ADDRESS}        0xA0218000
-        Set Suite Variable      ${FRC_DFLCTRL_REG}            0x001C
-        Set Suite Variable      ${FRC_WCNTCMP0_REG}           0x002C
-        Set Suite Variable      ${FRC_FCD0_REG}               0x0110
-        Set Suite Variable      ${MODULATOR_TXBR_REG}         0x0078
-        Set Suite Variable      ${MODULATOR_TXBR_VALUE}       0x6906
-        Set Suite Variable      ${MODULATOR_TXBR_HALF}        0x3483
-        Set Suite Variable      ${MODEM_CTRL0_REG}            0x005C
-        Set Suite Variable      ${MODEM_CTRL1_REG}            0x0060
-        Set Suite Variable      ${MODEM_PREAMBLE_REG}         0x0084
-        Set Suite Variable      ${MODEM_SYNC0_REG}            0x0420
-        Set Suite Variable      ${SYNTH_FREQ_REG}             0x0040
-        Set Suite Variable      ${JOIN_AFTER_SYNC}             0.0080
     ELSE
         Fail                    Unsupported LPW_MODEL: ${LPW_MODEL}
     END

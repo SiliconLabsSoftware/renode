@@ -3,7 +3,7 @@ Resource                      ${RENODEKEYWORDS}
 Resource                      common_keywords.robot
 
 *** Comments ***
-FRC frame assembly and disassembly tests shared by the xG22, xG24, xG301 and SIWG353 LPW models.
+FRC frame assembly and disassembly tests shared by the xG22, xG24 and xG301 LPW models.
 
 Every test programs the frame control descriptors and the BUFC buffers by hand and then drives one
 direction of the FRC. The TX tests force RAC into TX and inspect the frame the model puts on air; the
@@ -15,9 +15,8 @@ The modulator owns sync word insertion, so an assembled frame is always prefixed
 and an injected frame has to carry that prefix for RX sync detection to match. The reset values leave
 SYNCBITS and SYNC0 at zero, hence the single leading 00 byte throughout.
 
-Two register layouts exist: xG22, xG24 and xG301 share the Series 2 style FRC block and an 8-bit FCD
-WORDS field, while SIWG353 moves most registers and widens WORDS to 13 bits. Configure LPW Model
-supplies the model-specific addresses, offsets and field positions.
+xG22, xG24 and xG301 share the Series 2 style FRC block and an 8-bit FCD WORDS field. Configure
+LPW Model supplies the model-specific addresses, offsets and field positions.
 
 WORDS and FRAMELENGTH are programmed as (N-1) in hardware; the keywords here take the real count and
 do the conversion, so the test bodies read in words and bytes.
@@ -31,12 +30,12 @@ The PHY must be configured before Arm Rx Peer: the queue records the signature a
 reception is dropped unless it still matches.
 
 *** Variables ***
-# The LPW_MODEL variable selects the model under test: xg22, xg24, xg301 or siwg353.
+# The LPW_MODEL variable selects the model under test: xg22, xg24 or xg301.
 # It should be set from the command line to cover a model other than the default:
 # renode-test --variable LPW_MODEL:xg22 this_test.robot
 ${LPW_MODEL}                   xg301
 
-# FRC.CTRL, FRC.IF and FRC.DFLCTRL have the same field positions on all four models.
+# FRC.CTRL, FRC.IF and FRC.DFLCTRL have the same field positions on all three models.
 ${FRC_CTRL_TXFCDMODE_SHIFT}    4
 ${FRC_CTRL_RXFCDMODE_SHIFT}    6
 ${FRC_IF_TXUF}                 0x8
@@ -72,12 +71,12 @@ ${FRAME_BEYOND_8BIT_WORDS}     257
 ${SYNC_PREFIX}                 00
 ${SYNC_PREFIX_BYTE}            0x00
 
-# RAC.FORCESTATE sits at the same offset on all four models, and so does RXSEARCH, state 2 of the
+# RAC.FORCESTATE sits at the same offset on all three models, and so does RXSEARCH, state 2 of the
 # radio state machine. The TX state differs, so it comes from Configure LPW Model.
 ${RAC_FORCESTATE_REG}          0x0018
 ${RAC_FORCESTATE_RXSEARCH}     0x2
 
-# MODEM_CTRL1.SYNCDATA and MODEM_CTRL0.CODING sit at the same bits on all four models; only the
+# MODEM_CTRL1.SYNCDATA and MODEM_CTRL0.CODING sit at the same bits on all three models; only the
 # register offsets move. CODING=LINECODE is the BLE LE Coded (long range) PHY.
 ${MODEM_CTRL1_SYNCDATA_BIT}    11
 ${MODEM_CTRL0_CODING_SHIFT}    4
@@ -118,9 +117,6 @@ Configure LPW Model
         Set Suite Variable     ${FRC_FCD0_REG}              0x0110
         Set Suite Variable     ${MODEM_CTRL0_REG}           0x005C
         Set Suite Variable     ${MODEM_CTRL1_REG}           0x0060
-    ELSE IF  '${LPW_MODEL}' == 'siwg353'
-        Set Suite Variable     ${PLATFORM_FILE}             platforms/boards/silabs/brd1025c.repl
-        Configure Series 3 Registers
     ELSE
         Fail                   Unsupported LPW_MODEL: ${LPW_MODEL}
     END
@@ -157,41 +153,6 @@ Configure Series 2 Registers
     Set Suite Variable         ${BUFC_BUF0_WRITEOFFSET_REG}  0x0014
     Set Suite Variable         ${BUFC_BUF0_READOFFSET_REG}  0x0018
     Set Suite Variable         ${BUFC_BUFFER_STRIDE}        0x40
-
-Configure Series 3 Registers
-    Set Suite Variable         ${FRC_BLOCK_ADDRESS}         0xA0200000
-    Set Suite Variable         ${RAC_BLOCK_ADDRESS}         0xA0220000
-    Set Suite Variable         ${BUFC_BLOCK_ADDRESS}        0xA0300000
-    # SIWG353 splits the modem in two blocks; the baud rate lives in the modulator.
-    Set Suite Variable         ${MODULATOR_BLOCK_ADDRESS}   0xA0280000
-    Set Suite Variable         ${MODULATOR_TXBR_REG}        0x0078
-    Set Suite Variable         ${MODULATOR_TXBR_VALUE}      ${SERIES_3_TXBR_VALUE}
-    Set Suite Variable         ${BUFC_RAM_ADDRESS}          0x20020000
-    Set Suite Variable         ${RAC_FORCESTATE_TX}         0x6
-    Set Suite Variable         ${FRC_DFLCTRL_REG}           0x001C
-    Set Suite Variable         ${FRC_MAXLENGTH_REG}         0x0044
-    Set Suite Variable         ${FRC_WCNT_REG}              0x0028
-    Set Suite Variable         ${FRC_WCNTCMP0_REG}          0x002C
-    Set Suite Variable         ${FRC_WCNTCMP1_REG}          0x0030
-    Set Suite Variable         ${FRC_WCNTCMP2_REG}          0x0034
-    Set Suite Variable         ${FRC_CTRL_REG}              0x0010
-    Set Suite Variable         ${FRC_IF_REG}                0x00C0
-    Set Suite Variable         ${FRC_IEN_REG}               0x00C4
-    Set Suite Variable         ${FRC_FCD0_REG}              0x0110
-    Set Suite Variable         ${FCD_BUFFER_SHIFT}          14
-    Set Suite Variable         ${FCD_INCLUDECRC_BIT}        16
-    Set Suite Variable         ${FCD_CALCCRC_BIT}           17
-    Set Suite Variable         ${FCD_EXCLUDESUBFRAMEWCNT_BIT}  22
-    # WORDS is 13 bits wide here, so the unlimited encoding is 0x1FFF.
-    Set Suite Variable         ${FCD_UNLIMITED_WORDS}       0x2000
-    Set Suite Variable         ${BUFC_BUF0_CTRL_REG}        0x0010
-    Set Suite Variable         ${BUFC_BUF0_ADDR_REG}        0x0014
-    Set Suite Variable         ${BUFC_BUF0_WRITEOFFSET_REG}  0x0018
-    Set Suite Variable         ${BUFC_BUF0_READOFFSET_REG}  0x001C
-    Set Suite Variable         ${BUFC_BUFFER_STRIDE}        0x40
-    # SIWG353 splits the modem, and CODING / SYNCDATA both live on the modulator side.
-    Set Suite Variable         ${MODEM_CTRL0_REG}           0x005C
-    Set Suite Variable         ${MODEM_CTRL1_REG}           0x0060
 
 Create Machine
     Configure LPW Model
