@@ -86,6 +86,9 @@ ${EUSART0_CMD}                  0x38
 ${EUSART0_RXDATA}               0x3C
 ${EUSART0_RXDATA_ADDRESS}       0x4020803C
 ${EUSART_CMD_RXEN}              0x1
+${EUSART_CMD_TXEN}              0x4
+${EUSART_CMD_TXDIS}             0x8
+${EUSART_CMD_CLEARTX}           0x100
 ${EUSART_CFG1_TXDMAWU}          0x200
 ${EUSART_CFG1_RXDMAWU}          0x400
 ${EUSART_CFG1_RXDMAWU_RXFIW_1}  0x08000400
@@ -589,9 +592,30 @@ EUSART0 TX DMA Wakeup Holds EM1P While Enabled
     Create Machine
     Configure EUSART0           ${EUSART_CFG1_TXDMAWU}
     Enter Host Sleep            True
+    # TXDMAWU alone does not wake. The transmitter has to be enabled.
+    Energy Mode Should Be       EM2
+    Host Clocks Should Be       False
+
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_CMD} ${EUSART_CMD_TXEN}
     Energy Mode Should Be       EM1P
     Host Clocks Should Be       True
     HostAll Clocks Should Be    False
+
+    # CLEARTX drops the wake-up until the next TXEN. TXDIS and clearing EN drop it too.
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_CMD} ${EUSART_CMD_CLEARTX}
+    Energy Mode Should Be       EM2
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_CMD} ${EUSART_CMD_TXEN}
+    Energy Mode Should Be       EM1P
+
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_CMD} ${EUSART_CMD_TXDIS}
+    Energy Mode Should Be       EM2
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_CMD} ${EUSART_CMD_TXEN}
+    Energy Mode Should Be       EM1P
+
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_ENABLE} 0x0
+    Energy Mode Should Be       EM2
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_ENABLE} 0x1
+    Energy Mode Should Be       EM1P
 
     Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_CFG1} 0x0
     Energy Mode Should Be       EM2
@@ -601,6 +625,7 @@ Only EUSART0 Requests EM1P
     Create Machine
     Execute Command             sysbus.eusart1 WriteDoubleWord ${EUSART0_ENABLE} 0x1
     Execute Command             sysbus.eusart1 WriteDoubleWord ${EUSART0_CFG1} ${EUSART_CFG1_TXDMAWU}
+    Execute Command             sysbus.eusart1 WriteDoubleWord ${EUSART0_CMD} ${EUSART_CMD_TXEN}
     Enter Host Sleep            True
     Energy Mode Should Be       EM2
 

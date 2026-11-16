@@ -68,7 +68,11 @@ ${EUART0_CMD}                   0x30
 ${EUART0_RXDATA}                0x34
 ${EUART0_RXDATA_ADDRESS}        0x4A030034
 ${EUART_CMD_RXEN}               0x1
+${EUART_CMD_TXEN}               0x4
+${EUART_CMD_TXDIS}              0x8
+${EUART_CMD_CLEARTX}            0x100
 ${EUART_CFG1_RXDMAWU}           0x400
+${EUART_CFG1_TXDMAWU}           0x200
 ${EUART_FRAME}                  0x41
 
 # LDMA channel 0. REQSEL picks EUART0 (source 0x10) receive FIFO level (signal 0).
@@ -376,6 +380,39 @@ EUART0 RX DMA Wakeup Holds EM1P Until The Frame Is Read
     HostAll Clocks Should Be    False
 
     Execute Command             sysbus.eusart0 ReadDoubleWord ${EUART0_RXDATA}
+    Energy Mode Should Be       EM2
+    Host Clocks Should Be       False
+
+EUART0 TX DMA Wakeup Holds EM1P While Enabled
+    Create Machine
+    Configure EUART0            ${EUART_CFG1_TXDMAWU}
+    Enter Host Sleep            True
+    # TXDMAWU alone does not wake. The transmitter has to be enabled.
+    Energy Mode Should Be       EM2
+    Host Clocks Should Be       False
+
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUART0_CMD} ${EUART_CMD_TXEN}
+    Energy Mode Should Be       EM1P
+    Host Clocks Should Be       True
+    HostAll Clocks Should Be    False
+
+    # CLEARTX drops the wake-up until the next TXEN. TXDIS and clearing EN drop it too.
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUART0_CMD} ${EUART_CMD_CLEARTX}
+    Energy Mode Should Be       EM2
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUART0_CMD} ${EUART_CMD_TXEN}
+    Energy Mode Should Be       EM1P
+
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUART0_CMD} ${EUART_CMD_TXDIS}
+    Energy Mode Should Be       EM2
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUART0_CMD} ${EUART_CMD_TXEN}
+    Energy Mode Should Be       EM1P
+
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUART0_ENABLE} 0x0
+    Energy Mode Should Be       EM2
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUART0_ENABLE} 0x1
+    Energy Mode Should Be       EM1P
+
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUART0_CFG1} 0x0
     Energy Mode Should Be       EM2
     Host Clocks Should Be       False
 

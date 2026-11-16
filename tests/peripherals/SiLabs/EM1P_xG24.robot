@@ -21,9 +21,9 @@ holds the general-purpose timers, USART and SysTick. It runs in EM0 and EM1 only
 stay stopped in EM1P even when MCUEM1PMODE turns the Host EM1P domain on.
 The watchdog has no EM1P run bit: in EM1P it follows EM2RUN, the same as in EM2.
 
-Besides the radio, EUSART0 is an EM1P requester. With RXDMAWU or TXDMAWU set it asks for
-EM1P, and for the bus clock, while a DMA request is pending, so the LDMA can move the data
-while the host stays in deep sleep. The LDMA is a bus master on the Host EM1P domain: it
+Besides the radio, EUSART0 is an EM1P requester. With RXDMAWU set it asks for EM1P, and
+for the bus clock, while received frames are waiting. With TXDMAWU set it asks while the
+transmitter is enabled, and drops that request on TXDIS, CLEARTX or when EN is cleared. The LDMA is a bus master on the Host EM1P domain: it
 holds a request while that domain is gated and runs it once the clocks start.
 
 The host executes a real "wfi" out of SRAM. IRQ0 is enabled up front and pended to leave
@@ -115,6 +115,9 @@ ${EUSART0_CMD}                  0x38
 ${EUSART0_RXDATA}               0x3C
 ${EUSART0_RXDATA_ADDRESS}       0x4B01003C
 ${EUSART_CMD_RXEN}              0x1
+${EUSART_CMD_TXEN}              0x4
+${EUSART_CMD_TXDIS}             0x8
+${EUSART_CMD_CLEARTX}           0x100
 ${EUSART_CFG1_TXDMAWU}          0x200
 ${EUSART_CFG1_RXDMAWU}          0x400
 ${EUSART_CFG1_RXDMAWU_RXFIW_1}  0x08000400
@@ -649,11 +652,31 @@ EUSART0 TX DMA Wakeup Holds EM1P While Enabled
     Create Machine
     Configure EUSART0           ${EUSART_CFG1_TXDMAWU}
     Enter Host Sleep            True
+    # TXDMAWU alone does not wake. The transmitter has to be enabled.
+    Energy Mode Should Be       EM2
+    Host Clocks Should Be       False
+
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_CMD} ${EUSART_CMD_TXEN}
     Energy Mode Should Be       EM1P
     Host Clocks Should Be       True
     HostAll Clocks Should Be    False
 
-    # Software clears TXDMAWU once the transmit DMA is done.
+    # CLEARTX drops the wake-up until the next TXEN. TXDIS and clearing EN drop it too.
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_CMD} ${EUSART_CMD_CLEARTX}
+    Energy Mode Should Be       EM2
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_CMD} ${EUSART_CMD_TXEN}
+    Energy Mode Should Be       EM1P
+
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_CMD} ${EUSART_CMD_TXDIS}
+    Energy Mode Should Be       EM2
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_CMD} ${EUSART_CMD_TXEN}
+    Energy Mode Should Be       EM1P
+
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_ENABLE} 0x0
+    Energy Mode Should Be       EM2
+    Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_ENABLE} 0x1
+    Energy Mode Should Be       EM1P
+
     Execute Command             sysbus.eusart0 WriteDoubleWord ${EUSART0_CFG1} 0x0
     Energy Mode Should Be       EM2
     Host Clocks Should Be       False
