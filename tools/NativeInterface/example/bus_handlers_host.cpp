@@ -117,13 +117,13 @@ int main(int argc, char *argv[])
 {
     dut_state state;
     external_control control;
-    if(!load(argc, argv)) {
+    if(!check_usage(argc, argv)) {
         return exit_setup_error;
     }
 
     const auto on_read = [&state](auto... access) { return dut_read(state, access...); };
     const auto on_write = [&state](auto... access) { return dut_write(state, access...); };
-    if(!control.connect(machine_name, peripheral_name, on_read, on_write) || !execute_command("start")) {
+    if(!control.connect(argv[1], machine_name, peripheral_name, on_read, on_write) || !control.start()) {
         return exit_setup_error;
     }
 
@@ -134,7 +134,7 @@ int main(int argc, char *argv[])
         accesses = state.accesses;
     }
 
-    quit(control);
+    control.disconnect();
 
     if(!check_accesses(accesses)) {
         return exit_mismatch;

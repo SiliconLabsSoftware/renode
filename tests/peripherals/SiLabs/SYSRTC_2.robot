@@ -1,471 +1,238 @@
+*** Settings ***
+Test Setup                      Create Machine
+
 *** Variables ***
 ${FREQUENCY}                    25000
-${REPL_STRING}=                 SEPARATOR=
-...  """                                                                  ${\n}
-...  sysrtc: Timers.SiLabs_SYSRTC_2 @ sysbus <0x0, +0x4000>               ${\n}
-...  ${SPACE*4}frequency: ${FREQUENCY}                                    ${\n}
-...  hfxo: Miscellaneous.SiLabs.SiLabs_HFXO_5 @ sysbus <0x4000, +0x4000>  ${\n}
+${PLATFORM}                     SEPARATOR=\n
+...  """
+...  sysrtc: Timers.SiLabs_SYSRTC_2 @ sysbus <0x0, +0x4000>
+...  ${SPACE*4}frequency: ${FREQUENCY}
+...  hfxo: Miscellaneous.SiLabs.SiLabs_HFXO_5 @ sysbus <0x4000, +0x4000>
 ...  """
 # Registers
-${CMD_REG}                      0x0010
-${STATUS_REG}                   0x0014
-${CNT_REG}                      0x0018
-${MS_CNT_REG}                   0x0024
-${MS_CMP_REG}                   0x0028
-${IF_REG}                       0x0030
-${IEN_REG}                      0x0034
-${GRP0_IF_REG}                  0x0050
-${GRP0_IEN_REG}                 0x0054
-${GRP0_CTRL_REG}                0x0058
-${GRP0_CMP0_REG}                0x005C
-${GRP0_CMP1_REG}                0x0060
-${GRP0_PRETRIG_REG}             0x006C
-${GRP1_IF_REG}                  0x0080
-${GRP1_IEN_REG}                 0x0084
-${GRP1_CTRL_REG}                0x0088
-${GRP1_CMP0_REG}                0x008C
-${GRP1_CMP1_REG}                0x0090
-${GRP1_PRETRIG_REG}             0x009C
+${CMD}                          0x0010
+${STATUS}                       0x0014
+${CNT}                          0x0018
+${MS_CNT}                       0x0024
+${MS_CMP}                       0x0028
+${IF}                           0x0030
+${IEN}                          0x0034
+${GRP0_IF}                      0x0050
+${GRP0_IEN}                     0x0054
+${GRP0_CTRL}                    0x0058
+${GRP0_CMP0}                    0x005C
+${GRP0_CMP1}                    0x0060
+${GRP0_PRETRIG}                 0x006C
+${GRP1_IF}                      0x0080
+${GRP1_IEN}                     0x0084
+${GRP1_CTRL}                    0x0088
+${GRP1_CMP0}                    0x008C
+${GRP1_CMP1}                    0x0090
+${GRP1_PRETRIG}                 0x009C
 
 *** Keywords ***
 Create Machine
+    Renode Test Setup
     Execute Command             mach create "test"
-    Execute Command             machine LoadPlatformDescriptionFromString ${REPL_STRING}
+    Execute Command             machine LoadPlatformDescriptionFromString ${PLATFORM}
 
-Start Command
-    Execute Command             sysbus.sysrtc WriteDoubleWord ${CMD_REG} 0x1
+Register Should Be
+    [Arguments]                 ${register}  ${expected}
+    ${value}=                   Execute Command  sysrtc ReadDoubleWord ${register}
+    Should Be Equal As Integers  ${value}  ${expected}
 
-Stop Command
-    Execute Command             sysbus.sysrtc WriteDoubleWord ${CMD_REG} 0x2
+Group Flags Should Be
+    [Arguments]                 ${group0}  ${group1}
+    Register Should Be          ${GRP0_IF}  ${group0}
+    Register Should Be          ${GRP1_IF}  ${group1}
 
-Ms Start Command
-    Execute Command             sysbus.sysrtc WriteDoubleWord ${CMD_REG} 0x4
+IRQs Should Be
+    [Arguments]                 ${app}  ${appAlternate}  ${ms}
+    FOR  ${irq}  ${state}  IN  AppIRQ  ${app}  AppAlternateIRQ  ${appAlternate}  MsIRQ  ${ms}
+        ${irqState}=            Execute Command  sysrtc ${irq}
+        Should Contain          ${irqState}  GPIO: ${state}
+    END
 
-Ms Stop Command
-    Execute Command             sysbus.sysrtc WriteDoubleWord ${CMD_REG} 0x8
+# Start the Counter and let it count for one second
+Start Counter
+    Execute Command             sysrtc WriteDoubleWord ${CMD} 0x1
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${FREQUENCY}
 
-Assert App IRQ Is Set
-    ${irqState}=                    Execute Command  sysbus.sysrtc AppIRQ
-    Should Contain                  ${irqState}  GPIO: set
+# Start the MS Counter and let it count for one second
+Start MS Counter
+    Execute Command             sysrtc WriteDoubleWord ${CMD} 0x4
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} * 2 }}
+    Register Should Be          ${MS_CNT}  1000
 
-Assert App IRQ Is Unset
-    ${irqState}=                    Execute Command  sysbus.sysrtc AppIRQ
-    Should Contain                  ${irqState}  GPIO: unset
-
-Assert App Alternate IRQ Is Set
-    ${irqState}=                    Execute Command  sysbus.sysrtc AppAlternateIRQ
-    Should Contain                  ${irqState}  GPIO: set
-
-Assert App Alternate IRQ Is Unset
-    ${irqState}=                    Execute Command  sysbus.sysrtc AppAlternateIRQ
-    Should Contain                  ${irqState}  GPIO: unset
-
-Assert MS IRQ Is Set
-    ${irqState}=                    Execute Command  sysbus.sysrtc MsIRQ
-    Should Contain                  ${irqState}  GPIO: set
-
-Assert MS IRQ Is Unset
-    ${irqState}=                    Execute Command  sysbus.sysrtc MsIRQ
-    Should Contain                  ${irqState}  GPIO: unset
+Pretrigger Step
+    [Arguments]                 ${time}  ${count}  ${group0Flags}  ${group1Flags}  ${group0Pretrigger}  ${group1Pretrigger}
+    # Advance the counter
+    Execute Command             emulation RunFor "${time}"
+    Register Should Be          ${CNT}  ${count}
+    # Check Compare and Pretrigger
+    Group Flags Should Be       ${group0Flags}  ${group1Flags}
+    Register Should Be          ${GRP0_PRETRIG}  ${group0Pretrigger}
+    Register Should Be          ${GRP1_PRETRIG}  ${group1Pretrigger}
 
 *** Test Cases ***
-Counter/MS Counter
-    Create Machine
+Should Count With Counter And MS Counter
     # Start the Counter
-    Start Command
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers   ${read_val}  0x1
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 1
-    Should Be Equal As Integers   ${read_val}  ${check_val}
+    Execute Command             sysrtc WriteDoubleWord ${CMD} 0x1
+    Register Should Be          ${STATUS}  0x1
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${FREQUENCY}
     #Start the MS Counter
-    Ms Start Command
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers   ${read_val}  0x9
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${MS_CNT_REG}
-    Should Be Equal As Integers   ${read_val}  0
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 2
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${MS_CNT_REG}
-    Should Be Equal As Integers   ${read_val}  1000
+    Execute Command             sysrtc WriteDoubleWord ${CMD} 0x4
+    Register Should Be          ${STATUS}  0x9
+    Register Should Be          ${MS_CNT}  0
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} * 2 }}
+    Register Should Be          ${MS_CNT}  1000
     # Restart the Counter to verify that MS Counter is not reset
-    Start Command
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    Should Be Equal As Integers   ${read_val}  0
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${MS_CNT_REG}
-    Should Be Equal As Integers   ${read_val}  1000
+    Execute Command             sysrtc WriteDoubleWord ${CMD} 0x1
+    Register Should Be          ${CNT}  0
+    Register Should Be          ${MS_CNT}  1000
     # Stop MS counter
-    Ms Stop Command
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers   ${read_val}  0x1
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${MS_CNT_REG}
-    Should Be Equal As Integers   ${read_val}  0
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 1
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${MS_CNT_REG}
-    Should Be Equal As Integers   ${read_val}  0
+    Execute Command             sysrtc WriteDoubleWord ${CMD} 0x8
+    Register Should Be          ${STATUS}  0x1
+    Register Should Be          ${MS_CNT}  0
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${FREQUENCY}
+    Register Should Be          ${MS_CNT}  0
     # Start MS counter again to check that it started back from 0
-    Ms Start Command
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers   ${read_val}  0x9
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${MS_CNT_REG}
-    Should Be Equal As Integers   ${read_val}  0
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 2
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${MS_CNT_REG}
-    Should Be Equal As Integers   ${read_val}  1000
+    Execute Command             sysrtc WriteDoubleWord ${CMD} 0x4
+    Register Should Be          ${STATUS}  0x9
+    Register Should Be          ${MS_CNT}  0
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} * 2 }}
+    Register Should Be          ${MS_CNT}  1000
 
-Group0/1 Compare
-    Create Machine
-    # Start the Counter
-    Start Command
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 1
-    Should Be Equal As Integers   ${read_val}  ${check_val}
+Should Compare In Group 0 And 1
+    Start Counter
     # Configure compare values for both group0 and group1 and enable them
-    ${set_val}                    evaluate  ${FREQUENCY} * 2.5
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP0_CMP0_REG} ${set_val}
-    ${set_val}                    evaluate  ${FREQUENCY} * 3.5
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP1_CMP0_REG} ${set_val}
-    ${set_val}                    evaluate  ${FREQUENCY} * 4.5
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP0_CMP1_REG} ${set_val}
-    ${set_val}                    evaluate  ${FREQUENCY} * 5.5
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP1_CMP1_REG} ${set_val}
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP0_CTRL_REG} 0x3
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP0_IEN_REG} 0xF
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${IF_REG}
-    Should Be Equal As Integers   ${read_val}  0
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP1_CTRL_REG} 0x3
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP1_IEN_REG} 0xFF
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${IF_REG}
-    Should Be Equal As Integers   ${read_val}  0
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 2
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 3
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x2
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0
-    Assert App IRQ Is Set
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP0_IF_REG} 0
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 4
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x22
-    Assert App IRQ Is Set
-    Assert App Alternate IRQ Is Set
-    Assert Ms IRQ Is Unset
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP1_IF_REG} 0
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 5
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x4
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    Assert App IRQ Is Set
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP0_IF_REG} 0
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
+    Execute Command             sysrtc WriteDoubleWord ${GRP0_CMP0} ${{ ${FREQUENCY} * 2.5 }}
+    Execute Command             sysrtc WriteDoubleWord ${GRP1_CMP0} ${{ ${FREQUENCY} * 3.5 }}
+    Execute Command             sysrtc WriteDoubleWord ${GRP0_CMP1} ${{ ${FREQUENCY} * 4.5 }}
+    Execute Command             sysrtc WriteDoubleWord ${GRP1_CMP1} ${{ ${FREQUENCY} * 5.5 }}
+    Execute Command             sysrtc WriteDoubleWord ${GRP0_CTRL} 0x3
+    Execute Command             sysrtc WriteDoubleWord ${GRP0_IEN} 0xF
+    Register Should Be          ${IF}  0
+    Execute Command             sysrtc WriteDoubleWord ${GRP1_CTRL} 0x3
+    Execute Command             sysrtc WriteDoubleWord ${GRP1_IEN} 0xFF
+    Register Should Be          ${IF}  0
+    IRQs Should Be              unset  unset  unset
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} * 2 }}
+    Group Flags Should Be       0  0
+    IRQs Should Be              unset  unset  unset
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} * 3 }}
+    Group Flags Should Be       0x2  0
+    IRQs Should Be              set  unset  unset
+    Execute Command             sysrtc WriteDoubleWord ${GRP0_IF} 0
+    IRQs Should Be              unset  unset  unset
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} * 4 }}
+    Group Flags Should Be       0x0  0x22
+    IRQs Should Be              set  set  unset
+    Execute Command             sysrtc WriteDoubleWord ${GRP1_IF} 0
+    IRQs Should Be              unset  unset  unset
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} * 5 }}
+    Group Flags Should Be       0x4  0x0
+    IRQs Should Be              set  unset  unset
+    Execute Command             sysrtc WriteDoubleWord ${GRP0_IF} 0
+    IRQs Should Be              unset  unset  unset
     # Disable App group1 IRQ, check that App Alternate IRQ still gets set.
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP1_IEN_REG} 0xF0
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 6
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x44
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Set
-    Assert Ms IRQ Is Unset
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP1_IF_REG} 0
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
+    Execute Command             sysrtc WriteDoubleWord ${GRP1_IEN} 0xF0
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} * 6 }}
+    Group Flags Should Be       0x0  0x44
+    IRQs Should Be              unset  set  unset
+    Execute Command             sysrtc WriteDoubleWord ${GRP1_IF} 0
+    IRQs Should Be              unset  unset  unset
 
-Group0/1 Overflow
-    Create Machine
-    # Start the Counter
-    Start Command
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 1
-    Should Be Equal As Integers   ${read_val}  ${check_val}
+Should Overflow In Group 0 And 1
+    Start Counter
     # Enable group0 and group1 overflow interrupts
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP0_IEN_REG} 0x1
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP1_IEN_REG} 0x11
+    Execute Command             sysrtc WriteDoubleWord ${GRP0_IEN} 0x1
+    Execute Command             sysrtc WriteDoubleWord ${GRP1_IEN} 0x11
     # Set Counter to be very close to overflow
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${CNT_REG} 0xFFFFFFFE
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} - 1
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    Assert App IRQ Is Set
-    Assert App Alternate IRQ Is Set
-    Assert Ms IRQ Is Unset
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x1
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x11
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP0_IF_REG} 0
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP1_IF_REG} 0
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
+    Execute Command             sysrtc WriteDoubleWord ${CNT} 0xFFFFFFFE
+    IRQs Should Be              unset  unset  unset
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} - 1 }}
+    IRQs Should Be              set  set  unset
+    Group Flags Should Be       0x1  0x11
+    Execute Command             sysrtc WriteDoubleWord ${GRP0_IF} 0
+    Execute Command             sysrtc WriteDoubleWord ${GRP1_IF} 0
+    IRQs Should Be              unset  unset  unset
     # Enable only group1 alternate overflow interrupts
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP0_IEN_REG} 0x0
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP1_IEN_REG} 0x10
+    Execute Command             sysrtc WriteDoubleWord ${GRP0_IEN} 0x0
+    Execute Command             sysrtc WriteDoubleWord ${GRP1_IEN} 0x10
     # Set Counter to be very close to overflow
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${CNT_REG} 0xFFFFFFFE
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} - 1
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Set
-    Assert Ms IRQ Is Unset
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x1
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x11
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP0_IF_REG} 0
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP1_IF_REG} 0
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
+    Execute Command             sysrtc WriteDoubleWord ${CNT} 0xFFFFFFFE
+    IRQs Should Be              unset  unset  unset
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} - 1 }}
+    IRQs Should Be              unset  set  unset
+    Group Flags Should Be       0x1  0x11
+    Execute Command             sysrtc WriteDoubleWord ${GRP0_IF} 0
+    Execute Command             sysrtc WriteDoubleWord ${GRP1_IF} 0
+    IRQs Should Be              unset  unset  unset
 
-MS Compare
-    Create Machine
-    # Start the Counter
-    Start Command
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 1
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    # Start the MS Counter
-    Ms Start Command
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 2
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${MS_CNT_REG}
-    Should Be Equal As Integers   ${read_val}  1000
+Should Compare MS Counter
+    Start Counter
+    Start MS Counter
     # Set the MS compare value and enable the related interrupt
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${MS_CMP_REG} 2500
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${IEN_REG} 0x2
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 3
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${MS_CNT_REG}
-    Should Be Equal As Integers   ${read_val}  2000
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 4
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${MS_CNT_REG}
-    Should Be Equal As Integers   ${read_val}  3000
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Set
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x2
+    Execute Command             sysrtc WriteDoubleWord ${MS_CMP} 2500
+    Execute Command             sysrtc WriteDoubleWord ${IEN} 0x2
+    IRQs Should Be              unset  unset  unset
+    Register Should Be          ${IF}  0x0
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} * 3 }}
+    Register Should Be          ${MS_CNT}  2000
+    IRQs Should Be              unset  unset  unset
+    Register Should Be          ${IF}  0x0
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} * 4 }}
+    Register Should Be          ${MS_CNT}  3000
+    IRQs Should Be              unset  unset  set
+    Register Should Be          ${IF}  0x2
 
-MS Overflow
-    Create Machine
-    # Start the Counter
-    Start Command
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 1
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    # Start the MS Counter
-    Ms Start Command
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 2
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${MS_CNT_REG}
-    Should Be Equal As Integers   ${read_val}  1000
+Should Overflow MS Counter
+    Start Counter
+    Start MS Counter
     # Enable MS overflow interrupt
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${IEN_REG} 0x1
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
+    Execute Command             sysrtc WriteDoubleWord ${IEN} 0x1
+    IRQs Should Be              unset  unset  unset
     # Set MS Counter base value to be very close to overflow
-    Execute Command               sysbus.sysrtc MsTimerCounter 0xFFFFFFFE
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${MS_CNT_REG}
-    Should Be Equal As Integers   ${read_val}  0xFFFFFFFE
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 3
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${MS_CNT_REG}
-    Should Be Equal As Integers   ${read_val}  999
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Set
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${IF_REG} 0x0
-    Assert App IRQ Is Unset
-    Assert App Alternate IRQ Is Unset
-    Assert Ms IRQ Is Unset
+    Execute Command             sysrtc MsTimerCounter 0xFFFFFFFE
+    Register Should Be          ${MS_CNT}  0xFFFFFFFE
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} * 3 }}
+    Register Should Be          ${MS_CNT}  999
+    IRQs Should Be              unset  unset  set
+    Execute Command             sysrtc WriteDoubleWord ${IF} 0x0
+    IRQs Should Be              unset  unset  unset
 
-Group0/1 Pretrigger
-    Create Machine
-    # Start the Counter
-    Start Command
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 1
-    Should Be Equal As Integers   ${read_val}  ${check_val}
+Should Pretrigger In Group 0 And 1
+    Start Counter
     # Configure Compare value
-    ${set_val}                    evaluate  ${FREQUENCY} * 2
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP0_CMP0_REG} ${set_val}
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP1_CMP0_REG} ${set_val}
+    Execute Command             sysrtc WriteDoubleWord ${GRP0_CMP0} ${{ ${FREQUENCY} * 2 }}
+    Execute Command             sysrtc WriteDoubleWord ${GRP1_CMP0} ${{ ${FREQUENCY} * 2 }}
     # Configure Pretrigger
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP0_PRETRIG_REG} 0x37
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP1_PRETRIG_REG} 0xBF
+    Execute Command             sysrtc WriteDoubleWord ${GRP0_PRETRIG} 0x37
+    Execute Command             sysrtc WriteDoubleWord ${GRP1_PRETRIG} 0xBF
     # Enable Compare
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP0_CTRL_REG} 0x1
-    Execute Command               sysbus.sysrtc WriteDoubleWord ${GRP1_CTRL_REG} 0x1
-    # Advance the counter
-    Execute Command               emulation RunFor "0.9992"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 2 - 20
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    # Check Compare and Pretrigger
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_PRETRIG_REG}
-    Should Be Equal As Integers   ${read_val}  0x37
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_PRETRIG_REG}
-    Should Be Equal As Integers   ${read_val}  0xBF
-    # Advance the counter
-    Execute Command               emulation RunFor "0.00028"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 2 - 13
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    # Check Compare and Pretrigger
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_PRETRIG_REG}
-    Should Be Equal As Integers   ${read_val}  0x37
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_PRETRIG_REG}
-    Should Be Equal As Integers   ${read_val}  0x1BF
-    # Advance the counter
-    Execute Command               emulation RunFor "0.00016"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 2 - 9
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    # Check Compare and Pretrigger
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_PRETRIG_REG}
-    Should Be Equal As Integers   ${read_val}  0x37
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_PRETRIG_REG}
-    Should Be Equal As Integers   ${read_val}  0x3BF
-    # Advance the counter
-    Execute Command               emulation RunFor "0.00016"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 2 - 5
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    # Check Compare and Pretrigger
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_PRETRIG_REG}
-    Should Be Equal As Integers   ${read_val}  0x137
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_PRETRIG_REG}
-    Should Be Equal As Integers   ${read_val}  0x3BF
-    # Advance the counter
-    Execute Command               emulation RunFor "0.00016"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 2 - 1
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    # Check Compare and Pretrigger
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x0
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_PRETRIG_REG}
-    Should Be Equal As Integers   ${read_val}  0x337
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_PRETRIG_REG}
-    Should Be Equal As Integers   ${read_val}  0x3BF
-    # Advance the counter
-    Execute Command               emulation RunFor "0.00016"
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 2 + 3
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    # Check Compare and Pretrigger
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x2
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_IF_REG}
-    Should Be Equal As Integers   ${read_val}  0x22
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP0_PRETRIG_REG}
-    Should Be Equal As Integers   ${read_val}  0x337
-    ${read_val}=                  Execute Command  sysbus.sysrtc ReadDoubleWord ${GRP1_PRETRIG_REG}
-    Should Be Equal As Integers   ${read_val}  0x3BF
+    Execute Command             sysrtc WriteDoubleWord ${GRP0_CTRL} 0x1
+    Execute Command             sysrtc WriteDoubleWord ${GRP1_CTRL} 0x1
+    #                           time     count                         group IF   pretrigger
+    Pretrigger Step             0.9992   ${{ ${FREQUENCY} * 2 - 20 }}  0x0  0x0   0x37   0xBF
+    Pretrigger Step             0.00028  ${{ ${FREQUENCY} * 2 - 13 }}  0x0  0x0   0x37   0x1BF
+    Pretrigger Step             0.00016  ${{ ${FREQUENCY} * 2 - 9 }}   0x0  0x0   0x37   0x3BF
+    Pretrigger Step             0.00016  ${{ ${FREQUENCY} * 2 - 5 }}   0x0  0x0   0x137  0x3BF
+    Pretrigger Step             0.00016  ${{ ${FREQUENCY} * 2 - 1 }}   0x0  0x0   0x337  0x3BF
+    Pretrigger Step             0.00016  ${{ ${FREQUENCY} * 2 + 3 }}   0x2  0x22  0x337  0x3BF

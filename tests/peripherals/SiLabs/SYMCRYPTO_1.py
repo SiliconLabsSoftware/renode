@@ -1,11 +1,9 @@
-import test_lib
+import renode_monitor as test_lib
 from typing import List, Optional, Sequence, Tuple
 
 ################################################
 # Globals
 ################################################
-
-DEBUG = True
 
 SCRATCH_SRAM_BASE = 0x20000000
 SCRATCH_SRAM_SIZE = 0x10000
@@ -37,7 +35,6 @@ DESC_LAST = 1
 ENGINE_AES = 0x1
 ENGINE_HASH = 0x3
 TAG_CONFIG = 1 << 4
-TAG_LAST = 1 << 5
 TAG_HEADER = 1 << 6
 TAG_HMAC_KEY = 2 << 6
 
@@ -139,11 +136,7 @@ def hex_to_byte_list(hex_digits: str) -> List[int]:
     return [int(s[i : i + 2], 16) for i in range(0, len(s), 2)]
 
 def bytes_to_hex(ptr: int, n: int) -> str:
-    return "".join(f"{test_lib.read_byte(ptr + i):02x}" for i in range(n))
-
-def write_bytes(ptr: int, data: Sequence[int]) -> None:
-    for i, value in enumerate(data):
-        test_lib.write_byte(ptr + i, value)
+    return bytes(test_lib.read_bytes(ptr, n)).hex()
 
 def pack_dma_descriptor(tag: int, data: Optional[Sequence[int]], data_size: int, is_last: bool, discard: bool = False) -> Tuple[int, int]:
     """
@@ -162,13 +155,10 @@ def pack_dma_descriptor(tag: int, data: Optional[Sequence[int]], data_size: int,
     length_word = data_size & 0x0FFFFFFF
     if discard:
         length_word |= LENGTH_DISCARD
-    test_lib.write_doubleword(descriptor_address, data_pointer)
-    test_lib.write_doubleword(descriptor_address + 4, next_descriptor_pointer)
-    test_lib.write_doubleword(descriptor_address + 8, length_word)
-    test_lib.write_doubleword(descriptor_address + 12, tag)
+    test_lib.write_doublewords(descriptor_address, [data_pointer, next_descriptor_pointer, length_word, tag])
     if data is not None:
         assert len(data) == data_size, "data length must match data_size"
-        write_bytes(data_pointer, data)
+        test_lib.write_bytes(data_pointer, list(data))
     return descriptor_address, data_pointer
 
 def u32_le(value: int) -> List[int]:
@@ -528,24 +518,5 @@ def hmac_sha256_test() -> None:
     test_lib.test_assert(actual == HMAC_SHA256_DIGEST, f"HMAC-SHA-256 mismatch:\n  {actual}\n  {HMAC_SHA256_DIGEST}")
     print("  > HMAC-SHA-256 OK")
 
-################################################
-# Tests runner
-################################################
-
-test_lib.create_emulation(debug=DEBUG)
-test_lib.create_unit_test_machine("test", REPL_STRING)
-
-print("Running tests...")
-aes_ecb_test()
-aes_ctr_test()
-aes_cmac_test()
-aes_gcm_encrypt_test()
-aes_gcm_decrypt_test()
-aes_ccm_oneshot_encrypt_test()
-aes_ccm_oneshot_decrypt_test()
-aes_ccm_multipart_encrypt_test()
-aes_ccm_multipart_decrypt_test()
-aes_ccm_multipart_decrypt_tag_mismatch_test()
-sha256_test()
-hmac_sha256_test()
-print("Tests completed")
+def create_machine():
+    test_lib.create_unit_test_machine("test", REPL_STRING)

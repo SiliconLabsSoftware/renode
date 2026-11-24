@@ -19,14 +19,20 @@ endif()
 set(renode_api_sources
     ${CMAKE_CURRENT_LIST_DIR}/renode_api.c
     ${CMAKE_CURRENT_LIST_DIR}/${transport_source}
-    ${CMAKE_CURRENT_LIST_DIR}/silabs_time.c
     )
 
-# The host-library build passes -DCMAKE_BUILD_SHARED_LIBS=ON so silabs_time.c
-# can interpose clock_gettime and gettimeofday. A plain add_library() would
-# ignore that variable because CMake only honors BUILD_SHARED_LIBS.
-if(CMAKE_BUILD_SHARED_LIBS)
-    add_library(renode_api SHARED ${renode_api_sources})
+# Builds a shared library that overrides the time functions of a process it is preloaded into
+option(RENODE_API_TIME_OVERRIDE "Override time functions with Renode's virtual time" OFF)
+if(RENODE_API_TIME_OVERRIDE)
+    if(NOT RENODE_API_TRANSPORT STREQUAL "socket")
+        message(FATAL_ERROR "RENODE_API_TIME_OVERRIDE requires the 'socket' transport")
+    endif()
+    # A sanitized library aborts when preloaded into a program that isn't sanitized itself
+    if(RENODE_API_SANITIZERS)
+        message(FATAL_ERROR "RENODE_API_TIME_OVERRIDE can't be used with RENODE_API_SANITIZERS")
+    endif()
+    set(RENODE_API_SANITIZERS OFF)
+    add_library(renode_api SHARED ${renode_api_sources} ${CMAKE_CURRENT_LIST_DIR}/time_override.c)
 else()
     add_library(renode_api STATIC ${renode_api_sources})
 endif()

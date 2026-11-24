@@ -4,6 +4,8 @@ Resource                      common_keywords.robot
 
 *** Comments ***
 FRC frame assembly and disassembly tests shared by the xG22, xG24 and xG301 LPW models.
+The status, abort and reset value tests run on every model; the TXAFTERFRAME tests only run on the
+models that implement it.
 
 Every test programs the frame control descriptors and the BUFC buffers by hand and then drives one
 direction of the FRC. The TX tests force RAC into TX and inspect the frame the model puts on air; the
@@ -15,8 +17,8 @@ The modulator owns sync word insertion, so an assembled frame is always prefixed
 and an injected frame has to carry that prefix for RX sync detection to match. The reset values leave
 SYNCBITS and SYNC0 at zero, hence the single leading 00 byte throughout.
 
-xG22, xG24 and xG301 share the Series 2 style FRC block and an 8-bit FCD WORDS field. Configure
-LPW Model supplies the model-specific addresses, offsets and field positions.
+xG22, xG24 and xG301 share the Series 2 style FRC block and an 8-bit FCD WORDS field. Configure LPW
+Model supplies the model-specific addresses, offsets and field positions.
 
 WORDS and FRAMELENGTH are programmed as (N-1) in hardware; the keywords here take the real count and
 do the conversion, so the test bodies read in words and bytes.
@@ -50,12 +52,40 @@ ${FRC_DFLCTRL_DFLINCLUDECRC}   0x100000
 ${FRC_MAXLENGTH_UNRESTRICTED}  0xFF
 
 # TXBR resets to zero, which leaves the modelled data rate at 0 bps and makes the transmit airtime
-# infinite. Any non-zero setting will do; these give roughly 1 Mbps. Series 3 divides TXBRNUM by 2^16
-# while Series 2 uses the TXBRNUM / TXBRDEN pair.
+# infinite. Any non-zero setting will do; these give roughly 1 Mbps. xG301 divides TXBRNUM by 2^16
+# while xG22 and xG24 use the TXBRNUM / TXBRDEN pair.
 ${SERIES_3_TXBR_VALUE}         0xD20D
 
-# The CRC block is mocked and emits CRCWIDTH+1 zero bytes; CRCWIDTH resets to a one byte CRC.
-${MOCKED_CRC_BYTE}             00
+# The CRC block is mocked and emits CRCWIDTH+1 zero bytes. RFCRC.CTRL resets to
+# 0x704, so CRCWIDTH is 1 and the mock emits a 16-bit CRC.
+${MOCKED_CRC}                  00-00
+
+# FRC.STATUS, the FRC.IF bits below and DFLCTRL.DFLOFFSET (bits 11:8) sit at the same place on every
+# model. 0xF in DFLOFFSET is -1 in 4-bit two's complement. The STATUS bit positions come from
+# Configure LPW Model.
+${FRC_STATUS_REG}              0x0008
+${FRC_IF_TXDONE}               0x1
+${FRC_IF_TXABORTED}            0x4
+${FRC_IF_FRAMEERROR}           0x40
+${FRC_IF_RXDONE_FLAG}           0x10
+${FRC_RXCTRL_ACCEPTCRCERRORS}  0x2
+# The model hands a received frame to the FRC in 4 byte fragments, so only a frame of at most 4 bytes
+# reaches it in a single step, at the end of the frame, where its start and its end are processed in the
+# same call. Arm Rx Peer settles only briefly for these tests, so that short frame is still on air when
+# the radio starts receiving it, and a collision can then land mid-frame.
+${RX_FAIL_FRAME_BYTES}         3
+${RX_FAIL_SETTLE_TIME}         0.000002
+${PRECNTTOP_FINE_TICK}         37
+${RX_MID_FRAME_TIME}           0.00001
+${RX_AFTER_FRAME_TIME}         0.01
+${FRC_DFLOFFSET_MINUS_1}       0xF00
+${RAC_CMD_TXDIS}               0x20
+${RAC_CMD_TXAFTERFRAME}        0x10
+${RAC_STATUS_REG}              0x000C
+${RAC_STATUS_TXAFTERFRAMEPEND}  0x100000
+
+# FRC.FCDn reset value: WORDS is all ones, which selects the unlimited subframe encoding.
+${FRC_FCD_RESET}               0xFF
 
 # BUFC buffers reset to 64 bytes and wrap beyond that. BUFn_CTRL.SIZE=3 selects 512 bytes, enough for
 # a frame longer than the 8-bit WORDS field can express. Such buffers get their own RAM area, since
@@ -97,6 +127,10 @@ Configure LPW Model
         Set Suite Variable     ${FRC_FCD0_REG}              0x0104
         Set Suite Variable     ${MODEM_CTRL0_REG}           0x0020
         Set Suite Variable     ${MODEM_CTRL1_REG}           0x0024
+        Set Suite Variable     ${FRC_IPVERSION}             0x1
+        Set Suite Variable     ${FRC_STATUS_CRCERRORTOLERATED}  0
+        Set Suite Variable     ${FRC_CTRL_RESET}            0x00000700
+        Set Suite Variable     ${FRC_SNIFFCTRL_RESET}       0x000007FC
     ELSE IF  '${LPW_MODEL}' == 'xg24'
         Set Suite Variable     ${PLATFORM_FILE}             platforms/boards/silabs/brd4186c.repl
         Configure Series 2 Registers
@@ -104,6 +138,10 @@ Configure LPW Model
         Set Suite Variable     ${MODULATOR_TXBR_REG}        0x0068
         Set Suite Variable     ${MODEM_CTRL0_REG}           0x004C
         Set Suite Variable     ${MODEM_CTRL1_REG}           0x0050
+        Set Suite Variable     ${FRC_IPVERSION}             0x3
+        Set Suite Variable     ${FRC_STATUS_CRCERRORTOLERATED}  0x4000000
+        Set Suite Variable     ${FRC_CTRL_RESET}            0x03000700
+        Set Suite Variable     ${FRC_SNIFFCTRL_RESET}       0x000007FC
     ELSE IF  '${LPW_MODEL}' == 'xg301'
         Set Suite Variable     ${PLATFORM_FILE}             platforms/boards/silabs/brd1019a.repl
         Configure Series 2 Registers
@@ -114,9 +152,17 @@ Configure LPW Model
         Set Suite Variable     ${MODULATOR_TXBR_REG}        0x0078
         Set Suite Variable     ${MODULATOR_TXBR_VALUE}      ${SERIES_3_TXBR_VALUE}
         Set Suite Variable     ${RAC_FORCESTATE_TX}         0x6
+        # PROTIMER.PRECNTTOP holds the integer part of the prescaler top in bits 31:16 here.
+        Set Suite Variable     ${PROTIMER_BLOCK_ADDRESS}    0xA021C000
+        Set Suite Variable     ${PROTIMER_PRECNTTOP_REG}    0x0034
+        Set Suite Variable     ${PROTIMER_PRECNTTOP_SHIFT}  16
         Set Suite Variable     ${FRC_FCD0_REG}              0x0110
         Set Suite Variable     ${MODEM_CTRL0_REG}           0x005C
         Set Suite Variable     ${MODEM_CTRL1_REG}           0x0060
+        Set Suite Variable     ${FRC_IPVERSION}             0x7
+        Set Suite Variable     ${FRC_STATUS_CRCERRORTOLERATED}  0x4000000
+        Set Suite Variable     ${FRC_CTRL_RESET}            0x0B008700
+        Set Suite Variable     ${FRC_SNIFFCTRL_RESET}       0x070000FC
     ELSE
         Fail                   Unsupported LPW_MODEL: ${LPW_MODEL}
     END
@@ -130,6 +176,10 @@ Configure Series 2 Registers
     Set Suite Variable         ${MODULATOR_BLOCK_ADDRESS}   0xB8014000
     Set Suite Variable         ${BUFC_RAM_ADDRESS}          0x20000000
     Set Suite Variable         ${RAC_FORCESTATE_TX}         0x9
+    # PROTIMER.PRECNTTOP holds the integer part of the prescaler top in bits 23:8.
+    Set Suite Variable         ${PROTIMER_BLOCK_ADDRESS}    0xB801C000
+    Set Suite Variable         ${PROTIMER_PRECNTTOP_REG}    0x0030
+    Set Suite Variable         ${PROTIMER_PRECNTTOP_SHIFT}  8
     # Series 2 derives the baud rate from HFXO / (8 * TXBRNUM / TXBRDEN).
     Set Suite Variable         ${MODULATOR_TXBR_VALUE}      0x000A0030
     Set Suite Variable         ${FRC_DFLCTRL_REG}           0x000C
@@ -153,11 +203,20 @@ Configure Series 2 Registers
     Set Suite Variable         ${BUFC_BUF0_WRITEOFFSET_REG}  0x0014
     Set Suite Variable         ${BUFC_BUF0_READOFFSET_REG}  0x0018
     Set Suite Variable         ${BUFC_BUFFER_STRIDE}        0x40
+    Set Suite Variable         ${FRC_SEQIF_REG}             0x00B4
+    Set Suite Variable         ${FRC_RXCTRL_REG}            0x004C
+    Set Suite Variable         ${FRC_MAXLENGTH_RESET}       0x00004FFF
+    Set Suite Variable         ${FRC_STATUS_FRAMEOK}        0x200
+    Set Suite Variable         ${FRC_STATUS_FRAMELENGTHERROR}  0x40000
+    Set Suite Variable         ${RAC_CMD_REG}               0x0010
+    Set Suite Variable         ${FRC_SNIFFCTRL_REG}         0x0084
 
 Create Machine
     Configure LPW Model
+    Reset Emulation
     Execute Command             mach create "test"
     Execute Command             machine LoadPlatformDescription @${PLATFORM_FILE}
+    Execute Command             cpu IsHalted true
     # Forcing TX and injecting a received frame both complete synchronously, so nothing has to wait
     # for the log.
     Create Log Tester           0
@@ -322,6 +381,7 @@ Force Rx Search
     Execute Command             sysbus WriteDoubleWord ${addr} ${RAC_FORCESTATE_RXSEARCH}
 
 Arm Rx Peer
+    [Arguments]  ${settle}=0.005
     [Documentation]    Register this radio in the interference queue as its own future RX peer by
     ...                transmitting a throwaway frame. The transmission must not land on virtual time
     ...                zero, because TimeInterval.Empty is zero ticks and a queue entry stamped zero
@@ -334,7 +394,7 @@ Arm Rx Peer
     Write Frame Descriptor      0  4  0
     Load Bufc Buffer            0  0xDE  0xAD  0xBE  0xEF
     Force Tx
-    Execute Command             emulation RunFor "0.005"
+    Execute Command             emulation RunFor "${settle}"
     # Drop the transmit flags so the RX assertions start from a clean FRC.IF.
     Write Frc Register          ${FRC_IF_REG}  0
 
@@ -380,6 +440,85 @@ Word Counter Should Be
     [Arguments]  ${expected}
     ${wcnt}=                    Read Frc Register  ${FRC_WCNT_REG}
     Should Be Equal As Integers  ${wcnt}  ${expected}
+
+Use Fine Rx Delivery Timing
+    [Documentation]    The RX delivery timer ticks at the PROTIMER PRECNT overflow rate, about 1.7 ms at the
+    ...                PRECNTTOP reset value, which delivers any shorter frame at once. A PRECNTTOP of 37
+    ...                gives a 1 us tick at 38.4 MHz, so a frame then reaches the FRC fragment by fragment
+    ...                over its airtime. PRECNTTOP is written through its register, whose offset and field
+    ...                position come from Configure LPW Model. The model's own field is private, and its
+    ...                name is not stable: the obfuscated models rename it.
+    Execute Python              radio = self.Machine['sysbus.radio']
+    ${addr}=                    Evaluate  ${PROTIMER_BLOCK_ADDRESS} + ${PROTIMER_PRECNTTOP_REG}
+    ${value}=                   Evaluate  ${PRECNTTOP_FINE_TICK} << ${PROTIMER_PRECNTTOP_SHIFT}
+    Execute Command             sysbus WriteDoubleWord ${addr} ${value}
+
+Collide With Received Frame
+    [Documentation]    Fail the reception in progress as a collision after the sync word would. Both calls
+    ...                are public API: the interference queue, which a transmitting radio registers in, and
+    ...                IRadio.ReceiveFrame. The radio is its own peer, so a second transmission from it, with
+    ...                a later start time than the frame being received, is what the radio sees as another
+    ...                transmitter overlapping the reception. The fail reason is private model state that the
+    ...                obfuscated models rename, so nothing here reads or writes it.
+    Execute Python              from Antmicro.Renode.Peripherals.Wireless import InterferenceQueue
+    Execute Python              known, signature = InterferenceQueue.TryGetTxSignature(radio)
+    Execute Python              InterferenceQueue.Add(radio, signature, radio.Channel, 0, frame)
+    Execute Python              radio.ReceiveFrame(frame, radio)
+    Execute Python              InterferenceQueue.Remove(radio, True)
+
+Inject Failed Received Frame
+    [Documentation]    Deliver a frame whose reception is marked as failed, as a collision after the sync
+    ...                word would do, once the radio is in RX.
+    [Arguments]  ${nbytes}
+    Use Fine Rx Delivery Timing
+    Force Rx Search
+    ${bytes}=                   Evaluate  ','.join(str((i + 1) & 0xFF) for i in range(${nbytes}))
+    Execute Python              frame = System.Array[System.Byte]([${SYNC_PREFIX_BYTE},${bytes}])
+    Execute Python              radio.ReceiveFrame(frame, radio)
+    # Past the preamble and sync word, a collision no longer makes the radio drop the frame outright.
+    Execute Command             emulation RunFor "${RX_MID_FRAME_TIME}"
+    Collide With Received Frame
+    Execute Command             emulation RunFor "${RX_AFTER_FRAME_TIME}"
+
+Frc Status Flags Should Be
+    [Arguments]  ${mask}  ${expected}
+    ${status}=                  Read Frc Register  ${FRC_STATUS_REG}
+    ${masked}=                  Evaluate  int(${status}) & int(${mask})
+    Should Be Equal As Integers  ${masked}  ${expected}
+
+Frc Sequencer Interrupt Flags Should Be Set
+    [Arguments]  ${mask}
+    ${seqif}=                   Read Frc Register  ${FRC_SEQIF_REG}
+    ${masked}=                  Evaluate  int(${seqif}) & int(${mask})
+    Should Be Equal As Integers  ${masked}  ${mask}
+
+Skip Unless Tx After Frame Is Modeled
+    Skip If                     '${LPW_MODEL}' not in ('xg22', 'xg24')  Only xG22 and xG24 model RAC TXAFTERFRAME
+
+Receive Frame With Tx After Frame Pending
+    [Documentation]    Issue RAC TXAFTERFRAME while a frame is being received, then finish the reception,
+    ...                failing it as a collision after the sync word would when ${fail} is true.
+    [Arguments]  ${fail}  @{frame_bytes}
+    Use Fine Rx Delivery Timing
+    Force Rx Search
+    ${bytes}=                   Evaluate  ','.join(str(int(b, 0)) for b in $frame_bytes)
+    Execute Python              frame = System.Array[System.Byte]([${SYNC_PREFIX_BYTE},${bytes}])
+    Execute Python              radio.ReceiveFrame(frame, radio)
+    Execute Command             emulation RunFor "${RX_MID_FRAME_TIME}"
+    ${addr}=                    Evaluate  ${RAC_BLOCK_ADDRESS} + ${RAC_CMD_REG}
+    Execute Command             sysbus WriteDoubleWord ${addr} ${RAC_CMD_TXAFTERFRAME}
+    Tx After Frame Pending Should Be  ${RAC_STATUS_TXAFTERFRAMEPEND}
+    IF  ${fail}
+        Collide With Received Frame
+    END
+    Execute Command             emulation RunFor "${RX_AFTER_FRAME_TIME}"
+
+Tx After Frame Pending Should Be
+    [Arguments]  ${expected}
+    ${addr}=                    Evaluate  ${RAC_BLOCK_ADDRESS} + ${RAC_STATUS_REG}
+    ${status}=                  Execute Command  sysbus ReadDoubleWord ${addr}
+    ${masked}=                  Evaluate  int(${status}) & ${RAC_STATUS_TXAFTERFRAMEPEND}
+    Should Be Equal As Integers  ${masked}  ${expected}
 
 *** Test Cases ***
 Frc Assembles A Fixed Length Frame From One Descriptor
@@ -466,7 +605,7 @@ Frc Appends The Crc When Include Crc Is Set
 
     Force Tx
 
-    Frame Should Be Sent        11-22-33-44-${MOCKED_CRC_BYTE}
+    Frame Should Be Sent        11-22-33-44-${MOCKED_CRC}
     Word Counter Should Be      4
 
 Frc Appends No Crc When Only Calculate Crc Is Set
@@ -498,7 +637,7 @@ Frc Sends An Unlimited Subframe Longer Than The Words Field As One Subframe
     # which is shared by every machine in this Renode instance, and collides with the RX tests below.
     Execute Command             emulation RunFor "0.005"
 
-    Frame Should Be Sent        ${payload}-${MOCKED_CRC_BYTE}
+    Frame Should Be Sent        ${payload}-${MOCKED_CRC}
     Word Counter Should Be      ${FRAME_BEYOND_8BIT_WORDS}
     Frc Interrupt Flags Should Be Clear  ${FRC_IF_TXUF}
 
@@ -512,7 +651,7 @@ Frc Reserves The Crc Out Of A Dynamic Frame Length
 
     Force Tx
 
-    Frame Should Be Sent        04-AA-BB-CC-${MOCKED_CRC_BYTE}
+    Frame Should Be Sent        04-AA-BB-${MOCKED_CRC}
     Word Counter Should Be      5
 
 Frc Raises Every Word Counter Compare Crossed By The Frame
@@ -760,3 +899,256 @@ Frc Keeps A Leading Rx Descriptor That Marks No Sync Word
     Rx Buffer Should Contain    ${FIRST_RX_BUFFER}  11
     Rx Buffer Should Contain    ${SECOND_RX_BUFFER}  22-33-44
     Word Counter Should Be      4
+
+Frc Reports The Ip Version And Reset Values
+    Create Machine
+    ${value}=                   Read Frc Register  0x0000
+    Should Be Equal As Integers  ${value}  ${FRC_IPVERSION}
+    ${value}=                   Read Frc Register  ${FRC_MAXLENGTH_REG}
+    Should Be Equal As Integers  ${value}  ${FRC_MAXLENGTH_RESET}
+    ${value}=                   Read Frc Register  ${FRC_CTRL_REG}
+    Should Be Equal As Integers  ${value}  ${FRC_CTRL_RESET}
+    ${value}=                   Read Frc Register  ${FRC_SNIFFCTRL_REG}
+    Should Be Equal As Integers  ${value}  ${FRC_SNIFFCTRL_RESET}
+
+Frc Resets The Frame Descriptors To The Header Value
+    Create Machine
+    ${value}=                   Read Frc Register  ${FRC_FCD0_REG}
+    Should Be Equal As Integers  ${value}  ${FRC_FCD_RESET}
+
+Frc Applies A Negative Dynamic Frame Length Offset
+    [Documentation]    DFLOFFSET is a signed 4-bit value: a length field of 4 with an offset of -1
+    ...                gives FRAMELENGTH 3, a frame of four words.
+    Create Machine
+    Configure Dynamic Frame Length
+    ${dflctrl}=                 Evaluate  ${FRC_DFLCTRL_SINGLE_BYTE} | ${FRC_DFLOFFSET_MINUS_1}
+    Write Frc Register          ${FRC_DFLCTRL_REG}  ${dflctrl}
+    Write Frame Descriptor      0  ${FCD_UNLIMITED_WORDS}  0
+    Load Bufc Buffer            0  0x04  0x22  0x33  0x44  0x55
+
+    Force Tx
+
+    Frame Should Be Sent        04-22-33-44
+    ${framelength}=             Read Frc Register  ${FRC_WCNTCMP0_REG}
+    Should Be Equal As Integers  ${framelength}  3
+
+Frc Aborts A Transmission Whose Compensated Length Is Negative
+    [Documentation]    A negative length after the offset is always an error. In TX it is reported
+    ...                as TXABORTED rather than FRAMEERROR, and STATUS.FRAMELENGTHERROR is set.
+    Create Machine
+    Configure Dynamic Frame Length
+    ${dflctrl}=                 Evaluate  ${FRC_DFLCTRL_SINGLE_BYTE} | ${FRC_DFLOFFSET_MINUS_1}
+    Write Frc Register          ${FRC_DFLCTRL_REG}  ${dflctrl}
+    Write Frame Descriptor      0  ${FCD_UNLIMITED_WORDS}  0
+    Load Bufc Buffer            0  0x00  0x22  0x33  0x44
+
+    Force Tx
+
+    No Frame Should Be Sent
+    Frc Interrupt Flags Should Be Set  ${FRC_IF_TXABORTED}
+    Frc Sequencer Interrupt Flags Should Be Set  ${FRC_IF_TXABORTED}
+    Frc Interrupt Flags Should Be Clear  ${FRC_IF_FRAMEERROR}
+    Frc Status Flags Should Be  ${FRC_STATUS_FRAMELENGTHERROR}  ${FRC_STATUS_FRAMELENGTHERROR}
+    Frc Status Flags Should Be  ${FRC_STATUS_FRAMEOK}  0
+
+Frc Raises Frame Error For A Received Frame With A Length Beyond The Maximum
+    [Documentation]    In RX an invalid dynamic length discards the frame: FRAMEERROR is raised instead of
+    ...                RXDONE, nothing reaches the buffer, and TXABORTED stays clear.
+    Create Machine
+    Arm Rx Peer
+    Configure Dynamic Frame Length
+    Write Frc Register          ${FRC_MAXLENGTH_REG}  2
+    Write Frame Descriptor      ${FIRST_RX_DESCRIPTOR}  ${FCD_UNLIMITED_WORDS}  ${FIRST_RX_BUFFER}
+    Prepare Rx Buffer           ${FIRST_RX_BUFFER}
+
+    Inject Received Frame       0x04  0xAA  0xBB  0xCC
+
+    Frc Interrupt Flags Should Be Set  ${FRC_IF_FRAMEERROR}
+    Frc Interrupt Flags Should Be Clear  ${FRC_IF_RXDONE_FLAG}
+    Frc Interrupt Flags Should Be Clear  ${FRC_IF_TXABORTED}
+    Frc Status Flags Should Be  ${FRC_STATUS_FRAMELENGTHERROR}  ${FRC_STATUS_FRAMELENGTHERROR}
+    Rx Buffer Should Contain    ${FIRST_RX_BUFFER}  ${EMPTY}
+
+Frc Discards The Rest Of A Received Frame With An Invalid Length
+    [Documentation]    The length field arrives in the first fragment, so the fragments that follow it
+    ...                belong to a frame that is already discarded and must not reach the buffer either.
+    Create Machine
+    Arm Rx Peer                 ${RX_FAIL_SETTLE_TIME}
+    Configure Dynamic Frame Length
+    Write Frc Register          ${FRC_MAXLENGTH_REG}  2
+    Write Frame Descriptor      ${FIRST_RX_DESCRIPTOR}  ${FCD_UNLIMITED_WORDS}  ${FIRST_RX_BUFFER}
+    Configure Large Bufc Buffer  ${FIRST_RX_BUFFER}
+    Use Fine Rx Delivery Timing
+
+    Inject Received Frame       0x10  0x01  0x02  0x03  0x04  0x05  0x06  0x07  0x08  0x09  0x0A  0x0B  0x0C  0x0D  0x0E  0x0F  0x10
+    Execute Command             emulation RunFor "${RX_AFTER_FRAME_TIME}"
+
+    Frc Interrupt Flags Should Be Set  ${FRC_IF_FRAMEERROR}
+    Frc Interrupt Flags Should Be Clear  ${FRC_IF_RXDONE_FLAG}
+    Rx Buffer Should Contain    ${FIRST_RX_BUFFER}  ${EMPTY}
+
+Frc Raises The Length Field Compare For A Received Frame With An Invalid Length
+    [Documentation]    The length field has to arrive before it can be found invalid, so WCNTCMP1
+    ...                (LENGTHFIELDLOC) still fires for the discarded frame.
+    Create Machine
+    Arm Rx Peer                 ${RX_FAIL_SETTLE_TIME}
+    Configure Dynamic Frame Length
+    Configure Word Counter Compares  1  0
+    Write Frc Register          ${FRC_MAXLENGTH_REG}  2
+    Write Frame Descriptor      ${FIRST_RX_DESCRIPTOR}  ${FCD_UNLIMITED_WORDS}  ${FIRST_RX_BUFFER}
+    Configure Large Bufc Buffer  ${FIRST_RX_BUFFER}
+    Use Fine Rx Delivery Timing
+
+    Inject Received Frame       0x00  0x10  0x02  0x03
+    Execute Command             emulation RunFor "${RX_AFTER_FRAME_TIME}"
+
+    Frc Interrupt Flags Should Be Set  ${FRC_IF_FRAMEERROR}
+    Frc Interrupt Flags Should Be Set  ${FRC_IF_WCNTCMP1}
+    Frc Sequencer Interrupt Flags Should Be Set  ${FRC_IF_WCNTCMP1}
+    # The rejected length never becomes FRAMELENGTH, so the end-of-frame compare stays clear.
+    # Arm Rx Peer clears FRC.IF after its throwaway transmit, which is what leaves WCNTCMP0 observable here.
+    Frc Interrupt Flags Should Be Clear  ${FRC_IF_WCNTCMP0}
+
+Rac Keeps Tx After Frame Pending For A Good Received Frame
+    Skip Unless Tx After Frame Is Modeled
+    Create Machine
+    Arm Rx Peer                 ${RX_FAIL_SETTLE_TIME}
+    Configure Fixed Frame Length  ${RX_FAIL_FRAME_BYTES}
+    Write Frame Descriptor      ${FIRST_RX_DESCRIPTOR}  ${FCD_UNLIMITED_WORDS}  ${FIRST_RX_BUFFER}
+    Configure Large Bufc Buffer  ${FIRST_RX_BUFFER}
+
+    Receive Frame With Tx After Frame Pending  ${False}  0x01  0x02  0x03
+
+    Frc Interrupt Flags Should Be Set  ${FRC_IF_RXDONE_FLAG}
+    Tx After Frame Pending Should Be  ${RAC_STATUS_TXAFTERFRAMEPEND}
+
+Rac Clears Tx After Frame Pending When A Received Frame Fails
+    [Documentation]    TXAFTERFRAMEPEND is cleared when the ongoing reception is not successful, even when
+    ...                ACCEPTCRCERRORS still delivers the frame.
+    Skip Unless Tx After Frame Is Modeled
+    Create Machine
+    Arm Rx Peer                 ${RX_FAIL_SETTLE_TIME}
+    Configure Fixed Frame Length  ${RX_FAIL_FRAME_BYTES}
+    Write Frc Register          ${FRC_RXCTRL_REG}  ${FRC_RXCTRL_ACCEPTCRCERRORS}
+    Write Frame Descriptor      ${FIRST_RX_DESCRIPTOR}  ${FCD_UNLIMITED_WORDS}  ${FIRST_RX_BUFFER}
+    Configure Large Bufc Buffer  ${FIRST_RX_BUFFER}
+
+    Receive Frame With Tx After Frame Pending  ${True}  0x01  0x02  0x03
+
+    Frc Interrupt Flags Should Be Set  ${FRC_IF_RXDONE_FLAG}
+    Tx After Frame Pending Should Be  0
+
+Rac Clears Tx After Frame Pending When A Received Frame Is Discarded
+    Skip Unless Tx After Frame Is Modeled
+    Create Machine
+    Arm Rx Peer                 ${RX_FAIL_SETTLE_TIME}
+    Configure Dynamic Frame Length
+    Write Frc Register          ${FRC_MAXLENGTH_REG}  2
+    Write Frame Descriptor      ${FIRST_RX_DESCRIPTOR}  ${FCD_UNLIMITED_WORDS}  ${FIRST_RX_BUFFER}
+    Configure Large Bufc Buffer  ${FIRST_RX_BUFFER}
+
+    Receive Frame With Tx After Frame Pending  ${False}  0x10  0x01  0x02  0x03  0x04  0x05  0x06  0x07
+    ...                         0x08  0x09  0x0A  0x0B  0x0C  0x0D  0x0E  0x0F  0x10
+
+    Frc Interrupt Flags Should Be Set  ${FRC_IF_FRAMEERROR}
+    Tx After Frame Pending Should Be  0
+
+Frc Clears The Frame Length Error When The Next Frame Starts
+    [Documentation]    FRAMELENGTHERROR describes the current frame, so a following frame without a dynamic
+    ...                length must not inherit it.
+    Create Machine
+    Configure Dynamic Frame Length
+    ${dflctrl}=                 Evaluate  ${FRC_DFLCTRL_SINGLE_BYTE} | ${FRC_DFLOFFSET_MINUS_1}
+    Write Frc Register          ${FRC_DFLCTRL_REG}  ${dflctrl}
+    Write Frame Descriptor      0  ${FCD_UNLIMITED_WORDS}  0
+    Load Bufc Buffer            0  0x00  0x22  0x33  0x44
+    Force Tx
+    Frc Status Flags Should Be  ${FRC_STATUS_FRAMELENGTHERROR}  ${FRC_STATUS_FRAMELENGTHERROR}
+    # FORCESTATE acts on a change of its value, so leave TX through another state before forcing it again.
+    Force Rx Search
+    Execute Command             emulation RunFor "0.001"
+
+    Configure Fixed Frame Length  4
+    Write Frame Descriptor      0  4  0
+    Load Bufc Buffer            0  0x11  0x22  0x33  0x44
+    Force Tx
+
+    Frame Should Be Sent        11-22-33-44
+    Frc Status Flags Should Be  ${FRC_STATUS_FRAMELENGTHERROR}  0
+    Frc Status Flags Should Be  ${FRC_STATUS_FRAMEOK}  ${FRC_STATUS_FRAMEOK}
+
+Frc Keeps The Failure Of An Accepted Received Frame In The Status
+    [Documentation]    With ACCEPTCRCERRORS a failed frame is still delivered and RXDONE is raised, but
+    ...                STATUS must keep reporting the failure. The frame is short enough to be delivered
+    ...                to the FRC in a single step, so its start and its end happen in the same call and
+    ...                the end must not rearm FRAMEOK.
+    Create Machine
+    Arm Rx Peer                 ${RX_FAIL_SETTLE_TIME}
+    Configure Fixed Frame Length  ${RX_FAIL_FRAME_BYTES}
+    Write Frc Register          ${FRC_RXCTRL_REG}  ${FRC_RXCTRL_ACCEPTCRCERRORS}
+    Write Frame Descriptor      ${FIRST_RX_DESCRIPTOR}  ${FCD_UNLIMITED_WORDS}  ${FIRST_RX_BUFFER}
+    Configure Large Bufc Buffer  ${FIRST_RX_BUFFER}
+
+    Inject Failed Received Frame  ${RX_FAIL_FRAME_BYTES}
+
+    Frc Interrupt Flags Should Be Set  ${FRC_IF_FRAMEERROR}
+    Frc Interrupt Flags Should Be Set  ${FRC_IF_RXDONE_FLAG}
+    Frc Status Flags Should Be  ${FRC_STATUS_FRAMEOK}  0
+    IF  ${FRC_STATUS_CRCERRORTOLERATED} != 0
+        Frc Status Flags Should Be  ${FRC_STATUS_CRCERRORTOLERATED}  ${FRC_STATUS_CRCERRORTOLERATED}
+    END
+
+Frc Clears Frame Ok For A Failed Received Frame That Is Discarded
+    Create Machine
+    Arm Rx Peer                 ${RX_FAIL_SETTLE_TIME}
+    Configure Fixed Frame Length  ${RX_FAIL_FRAME_BYTES}
+    Write Frame Descriptor      ${FIRST_RX_DESCRIPTOR}  ${FCD_UNLIMITED_WORDS}  ${FIRST_RX_BUFFER}
+    Configure Large Bufc Buffer  ${FIRST_RX_BUFFER}
+
+    Inject Failed Received Frame  ${RX_FAIL_FRAME_BYTES}
+
+    Frc Interrupt Flags Should Be Set  ${FRC_IF_FRAMEERROR}
+    Frc Interrupt Flags Should Be Clear  ${FRC_IF_RXDONE_FLAG}
+    Frc Status Flags Should Be  ${FRC_STATUS_FRAMEOK}  0
+
+Frc Sets Frame Ok After A Good Transmission
+    Create Machine
+    Configure Fixed Frame Length  4
+    Write Frame Descriptor      0  4  0
+    Load Bufc Buffer            0  0x11  0x22  0x33  0x44
+
+    Force Tx
+
+    Frame Should Be Sent        11-22-33-44
+    Frc Status Flags Should Be  ${FRC_STATUS_FRAMEOK}  ${FRC_STATUS_FRAMEOK}
+
+Frc Reports A Transmit Underflow To The Host And The Sequencer
+    [Documentation]    The underflow sets TXUF in both IF and SEQIF and clears STATUS.FRAMEOK.
+    Create Machine
+    Configure Fixed Frame Length  8
+    Write Frame Descriptor      0  ${FCD_UNLIMITED_WORDS}  0
+    Load Bufc Buffer            0  0x11  0x22  0x33  0x44
+
+    Force Tx
+
+    Frc Interrupt Flags Should Be Set  ${FRC_IF_TXUF}
+    Frc Sequencer Interrupt Flags Should Be Set  ${FRC_IF_TXUF}
+    Frc Status Flags Should Be  ${FRC_STATUS_FRAMEOK}  0
+
+Frc Reports Tx Aborted When Txdis Is Issued In The Tx State
+    [Documentation]    TXDIS stops the transmission and the FRC reports it as aborted. Without a running
+    ...                PROTIMER a frame completes the moment it is sent, so the underflow below is used
+    ...                to keep the radio in the TX state long enough for the command to reach it.
+    Create Machine
+    Configure Fixed Frame Length  8
+    Write Frame Descriptor      0  ${FCD_UNLIMITED_WORDS}  0
+    Load Bufc Buffer            0  0x11  0x22  0x33  0x44
+    Force Tx
+    Frc Interrupt Flags Should Be Clear  ${FRC_IF_TXABORTED}
+
+    ${addr}=                    Evaluate  ${RAC_BLOCK_ADDRESS} + ${RAC_CMD_REG}
+    Execute Command             sysbus WriteDoubleWord ${addr} ${RAC_CMD_TXDIS}
+
+    Frc Interrupt Flags Should Be Set  ${FRC_IF_TXABORTED}
+    Frc Sequencer Interrupt Flags Should Be Set  ${FRC_IF_TXABORTED}
+    Frc Interrupt Flags Should Be Clear  ${FRC_IF_TXDONE}

@@ -1,17 +1,15 @@
+*** Settings ***
+Resource                        common/silabs.resource
+
 *** Variables ***
-# ELF is supplied by ./r runtest (a firmware-dev asset name, expanded to this
-# repository's release URL) or explicitly, for example:
+# The defaults can be overridden, for example:
 #   renode-test --variable ELF:path_or_url/connect_soc_mac_mode_device.out this_test.robot
-${ELF}                          ${EMPTY}
+${ELF}                          ${FIRMWARE_URL}/xg24_connect_soc_mac_mode_device_3_4_25.out-s_3599272-2686b4a0410b3d69c96716a3e1a6e9255e511554
 ${BOARD}                        brd4186c
-${QUANTUM_TIME}                 0.000020
+${UART}                         eusart0
 ${RNG_SEED}                     0
-${UART}                         usart0
-${DEFAULT_UART_TIMEOUT}         5
 ${PROMPT}                       >
 ${PAN_ID}                       0xABCD
-${NODE1_SHORT_ID}               0x1111
-${NODE2_SHORT_ID}               0x2222
 ${POWER}                        0
 ${CHANNEL}                      15
 ${KEY}                          AAAAAAAAAAAAAAAABBBBBBBBBBBBBBBB
@@ -21,127 +19,80 @@ ${SHORT_LONG_MASK}              0x0132
 ${LONG_SHORT_MASK}              0x0123
 ${LONG_LONG_MASK}               0x0133
 
-
 *** Keywords ***
 Initial Setup
-    Execute Command             emulation SetGlobalSerialExecution true
-    Execute Command             emulation SetQuantum "${QUANTUM_TIME}"
-    Execute Command             emulation SetAdvanceImmediately true    
+    Create Emulation
     IF  ${RNG_SEED} > 0
         Execute Command         emulation SetSeed ${RNG_SEED}
     END
-    ${RNG_SEED}=                Execute Command  emulation GetSeed
-    Log To Console              RNG SEED: ${RNG_SEED}
-    Execute Command             emulation CreateIEEE802_15_4Medium "wireless"
-    Set Default Uart Timeout    ${DEFAULT_UART_TIMEOUT}
-    Execute Command             logLevel 3
 
-Create Node
-    [Arguments]  ${machine_name}
-    [Return]     ${tester_id}
-    Execute Command             mach clear
-    Execute Command             mach create "${machine_name}"
-    Execute Command             machine LoadPlatformDescription @platforms/boards/silabs/${BOARD}.repl
-    Execute Command             sysbus LoadELF @${ELF}
-    Execute Command             sysbus LogAllPeripheralsAccess false
-    Execute Command             connector Connect sysbus.radio wireless
-    ${tester_id}=               Create Terminal Tester  sysbus.${UART}  machine=${machine_name}  defaultPauseEmulation=true
-    # This command togehter with using the "--enable-xwt" option when launching renote-test 
-    # pops up a UART shell for each node and allows to see the nodes CLI activity.
-    #Execute Command             showAnalyzer sysbus.${UART}
+Create Connect Node
+    [Arguments]                 ${name}  ${short_id}
+    ${tester}=                  Create Node  ${name}  ${BOARD}  ${ELF}  ${UART}
+    &{node}=                    Create Dictionary  tester=${tester}  short_id=${short_id}
+    RETURN                      ${node}
+
+Read Node Long Id
+    [Arguments]                 ${node}
+    Send                        ${node.tester}  info
+    ${line}=                    Wait For  ${node.tester}  Node Long id:  endline=${True}
+    Set To Dictionary           ${node}  long_id=${line}[-16:]
 
 Commission Network
-    [Arguments]  ${tester}  ${node_id}  ${pan_id}  ${power}  ${channel}
-    Write Line To Uart          commission 6 ${node_id} ${pan_id} ${power} ${channel}  testerId=${tester}
-    Wait For Line On Uart       Node parameters commissioned  testerId=${tester}
-    Write Line To Uart          info  testerId=${tester}
-    Wait For Line On Uart       Network state: 0x02  testerId=${tester}
-    Wait For Line On Uart       Node type: 0x06  testerId=${tester}
-    Wait For Line On Uart       Node id: ${node_id}  testerId=${tester}
-    Wait For Line On Uart       Pan id: ${pan_id}  testerId=${tester}
-    Wait For Line On Uart       Channel: ${channel}  testerId=${tester}
-
-Get Node Long Id
-    [Arguments]  ${tester}
-    [Return]     ${long_id}
-    Write Line To Uart          info  testerId=${tester}
-    ${s}=                       Wait For Line On Uart  Node Long id:  testerId=${tester}
-    ${long_id}=                 Get Substring  ${s.Line}  -16
-
-Set Key
-    [Arguments]  ${tester}  ${key}
-    Write Line To Uart          set_key {${key}}  testerId=${tester}
-    Wait For Line On Uart       Security key set successful  testerId=${tester}
+    [Arguments]                 ${node}
+    Send                        ${node.tester}  commission 6 ${node.short_id} ${PAN_ID} ${POWER} ${CHANNEL}
+    Wait For                    ${node.tester}  Node parameters commissioned
+    Send                        ${node.tester}  info
+    FOR  ${line}  IN  Network state: 0x02  Node type: 0x06  Node id: ${node.short_id}  Pan id: ${PAN_ID}  Channel: ${CHANNEL}
+        Wait For                ${node.tester}  ${line}
+    END
 
 Set Security
-    [Arguments]  ${tester}  ${enable}
-    IF  ${enable} == True
-        Write Line To Uart      set_options 0x03  testerId=${tester}
-    ELSE
-        Write Line To Uart      set_options 0x02  testerId=${tester}
-    END
-    Wait For Line On Uart       Send options set:  testerId=${tester}
+    [Arguments]                 ${node}  ${enable}
+    Send                        ${node.tester}  set_options ${{ '0x03' if ${enable} else '0x02' }}
+    Wait For                    ${node.tester}  Send options set:
 
-Set Security Mapping
-    [Arguments]  ${tester}  ${remote_short_id}  ${remote_long_id}
-    Write Line To Uart          set_security_mapping ${remote_short_id} {${remote_long_id}}  testerId=${tester}
-    Wait For Line On Uart       Security mapping set  testerId=${tester}
+Enable Security
+    [Arguments]                 ${node}  ${remote}
+    Send                        ${node.tester}  set_key {${KEY}}
+    Wait For                    ${node.tester}  Security key set successful
+    Set Security                ${node}  True
+    Send                        ${node.tester}  set_security_mapping ${remote.short_id} {${remote.long_id}}
+    Wait For                    ${node.tester}  Security mapping set
 
 Send Test Message
-    [Arguments]  ${addr_mask}  ${tx_tester}  ${src_short}  ${src_long}  ${rx_tester}  ${dst_short}  ${dst_long}
-    Write Line To Uart          send ${addr_mask} ${src_short} {${src_long}} ${dst_short} {${dst_long}} ${PAN_ID} ${PAN_ID} {${TEST_PAYLOAD}}  ${tx_tester}
-    Wait For Line On Uart       MAC frame submitted  testerId=${tx_tester}
-    Wait For Line On Uart       MAC RX: Data from.*:{ ${TEST_PAYLOAD}}  testerId=${rx_tester}  treatAsRegex=true
-    Should Not Be On Uart       MAC TX:  testerId=${tx_tester}  timeout=0.25
+    [Arguments]                 ${addr_mask}  ${tx}  ${rx}
+    ${source}=                  Set Variable  ${tx.short_id} {${tx.long_id}}
+    ${destination}=             Set Variable  ${rx.short_id} {${rx.long_id}}
+    Send                        ${tx.tester}  send ${addr_mask} ${source} ${destination} ${PAN_ID} ${PAN_ID} {${TEST_PAYLOAD}}
+    Wait For                    ${tx.tester}  MAC frame submitted
+    Wait For                    ${rx.tester}  MAC RX: Data from.*:{ ${TEST_PAYLOAD}}
+    Should Not Receive          ${tx.tester}  MAC TX:  timeout=0.25
+
+Exchange Test Messages
+    [Arguments]                 ${node1}  ${node2}
+    FOR  ${mask}  IN  ${SHORT_SHORT_MASK}  ${LONG_SHORT_MASK}  ${SHORT_LONG_MASK}  ${LONG_LONG_MASK}
+        Send Test Message       ${mask}  ${node1}  ${node2}
+        Send Test Message       ${mask}  ${node2}  ${node1}
+    END
 
 *** Test Cases ***
-Connect Mac Mode Basic Test
+Should Exchange MAC Mode Messages
     Initial Setup
+    ${node1}=                   Create Connect Node  node1  0x1111
+    ${node2}=                   Create Connect Node  node2  0x2222
+    FOR  ${node}  IN  ${node1}  ${node2}
+        Wait For                ${node.tester}  ${PROMPT}
+    END
+    Read Node Long Id           ${node1}
+    Read Node Long Id           ${node2}
+    Commission Network          ${node1}
+    Commission Network          ${node2}
 
-    ${NODE1_TESTER_ID}=         Create Node  node1
-    ${NODE2_TESTER_ID}=         Create Node  node2
+    Set Security                ${node1}  False
+    Set Security                ${node2}  False
+    Exchange Test Messages      ${node1}  ${node2}
 
-    Wait For Prompt On Uart     ${PROMPT}  testerId=${NODE1_TESTER_ID}
-    Wait For Prompt On Uart     ${PROMPT}  testerId=${NODE2_TESTER_ID}
-
-    ${NODE1_LONG_ID}=           Get Node Long Id  ${NODE1_TESTER_ID}
-    ${NODE2_LONG_ID}=           Get Node Long Id  ${NODE2_TESTER_ID}
-
-    Commission Network          ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${PAN_ID}  ${POWER}  ${CHANNEL}
-    Commission Network          ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${PAN_ID}  ${POWER}  ${CHANNEL}
-
-    Set Security                ${NODE1_TESTER_ID}  False
-    Set Security                ${NODE2_TESTER_ID}  False
-
-    Send Test Message           ${SHORT_SHORT_MASK}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}
-    Send Test Message           ${SHORT_SHORT_MASK}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}
-
-    Send Test Message           ${LONG_SHORT_MASK}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}
-    Send Test Message           ${LONG_SHORT_MASK}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}
-
-    Send Test Message           ${SHORT_LONG_MASK}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}
-    Send Test Message           ${SHORT_LONG_MASK}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}
-
-    Send Test Message           ${LONG_LONG_MASK}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}
-    Send Test Message           ${LONG_LONG_MASK}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}
-
-    Set Key                     ${NODE1_TESTER_ID}  ${KEY}
-    Set Key                     ${NODE2_TESTER_ID}  ${KEY}
-
-    Set Security                ${NODE1_TESTER_ID}  True
-    Set Security                ${NODE2_TESTER_ID}  True
-
-    Set Security Mapping        ${NODE1_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}
-    Set Security Mapping        ${NODE2_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}
-
-    Send Test Message           ${SHORT_SHORT_MASK}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}
-    Send Test Message           ${SHORT_SHORT_MASK}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}
-
-    Send Test Message           ${LONG_SHORT_MASK}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}
-    Send Test Message           ${LONG_SHORT_MASK}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}
-
-    Send Test Message           ${SHORT_LONG_MASK}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}
-    Send Test Message           ${SHORT_LONG_MASK}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}
-
-    Send Test Message           ${LONG_LONG_MASK}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}
-    Send Test Message           ${LONG_LONG_MASK}  ${NODE2_TESTER_ID}  ${NODE2_SHORT_ID}  ${NODE2_LONG_ID}  ${NODE1_TESTER_ID}  ${NODE1_SHORT_ID}  ${NODE1_LONG_ID}
+    Enable Security             ${node1}  ${node2}
+    Enable Security             ${node2}  ${node1}
+    Exchange Test Messages      ${node1}  ${node2}

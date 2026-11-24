@@ -38,11 +38,14 @@ Configure LPW Model
     ELSE IF  '${LPW_MODEL}' == 'xg301'
         Set Suite Variable     ${PLATFORM_FILE}             platforms/boards/silabs/brd1019a.repl
         Configure Series 3 Registers
+        Set Suite Variable     ${PROTIMER_IPVERSION}        0x3
+        Set Suite Variable     ${PROTIMER_LBTCTRL_RESET}    0x0
     ELSE
         Fail                   Unsupported LPW_MODEL: ${LPW_MODEL}
     END
 
 Configure Series 2 Registers
+    Set Suite Variable         ${PROTIMER_SERIES}           2
     Set Suite Variable         ${PROTIMER_BLOCK_ADDRESS}    0xB801C000
     # DEBUGRUN | PRECNTSRC_CLOCK | BASECNTSRC_PRECNTOF | WRAPCNTSRC_BASECNTOF
     Set Suite Variable         ${PROTIMER_CTRL_VALUE}       0x21102
@@ -60,6 +63,7 @@ Configure Series 2 Registers
     Set Suite Variable         ${PROTIMER_IF_CC3}           0x800
 
 Configure Series 3 Registers
+    Set Suite Variable         ${PROTIMER_SERIES}           3
     Set Suite Variable         ${PROTIMER_BLOCK_ADDRESS}    0xA021C000
     # DEBUGRUN | PRECNTSRC_CLOCK | BASECNTSRC_PRECNTOF | WRAPCNTSRC_BASECNTOF
     Set Suite Variable         ${PROTIMER_CTRL_VALUE}       0x942
@@ -78,8 +82,10 @@ Configure Series 3 Registers
 
 Create Machine
     Configure LPW Model
+    Reset Emulation
     Execute Command             mach create "test"
     Execute Command             machine LoadPlatformDescription @${PLATFORM_FILE}
+    Execute Command             cpu IsHalted true
     Execute Command             logLevel 3
 
 Read ProTimer Register
@@ -166,3 +172,31 @@ Wrap Only Compare Fires On Wrap Match
     Compare Flag Should Be Clear
     Execute Command             emulation RunFor "0.0015"
     Compare Flag Should Be Set
+
+Series 3 Reset Values Match The Register Map
+    Create Machine
+    Skip If                     ${PROTIMER_SERIES} != 3  The Series 3 register map does not apply to ${LPW_MODEL}
+    # IPVERSION
+    ${value}=                   Read ProTimer Register  0x0000
+    Should Be Equal As Integers  ${value}  ${PROTIMER_IPVERSION}
+    # BASECNTTOP
+    ${value}=                   Read ProTimer Register  0x0038
+    Should Be Equal As Integers  ${value}  0xFFFF
+    # LBTCTRL
+    ${value}=                   Read ProTimer Register  0x0064
+    Should Be Equal As Integers  ${value}  ${PROTIMER_LBTCTRL_RESET}
+
+Series 3 Wrap Base Window Selects A Combined Counter View
+    Create Machine
+    Skip If                     ${PROTIMER_SERIES} != 3  The Series 3 register map does not apply to ${LPW_MODEL}
+    Write ProTimer Register     ${PROTIMER_WRAPCNT_REG}  0x12345678
+    Write ProTimer Register     ${PROTIMER_BASECNT_REG}  0x9ABCDEF0
+    # WRAPBASESEL = 0 shows BASECNT
+    ${value}=                   Read ProTimer Register  0x00B4
+    Should Be Equal As Integers  ${value}  0x9ABCDEF0
+    # WRAPBASESEL = 16 straddles WRAPCNT[15:0] and BASECNT[31:16]
+    Write ProTimer Register     0x00B0  16
+    ${value}=                   Read ProTimer Register  0x00B4
+    Should Be Equal As Integers  ${value}  0x56789ABC
+    ${value}=                   Read ProTimer Register  0x00B0
+    Should Be Equal As Integers  ${value}  16

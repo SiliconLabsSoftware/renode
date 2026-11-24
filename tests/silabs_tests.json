@@ -137,8 +137,31 @@
   "unit-test-crypto": {
     "title": "SiLabs Unit Tests (Crypto)",
     "tests": [
-      "tests/peripherals/SiLabs/secure_engine_commands.py",
-      "tests/peripherals/SiLabs/SYMCRYPTO_1.py"
+      "tests/peripherals/SiLabs/SecureElement.robot",
+      "tests/peripherals/SiLabs/SYMCRYPTO_1.robot"
+    ]
+  },
+  "unit-test-bufc": {
+    "title": "SiLabs Unit Tests: BUFC",
+    "tests": [
+      {
+        "test": "tests/peripherals/SiLabs/BUFC.robot",
+        "params": {
+          "BUFC_VERSION": "1"
+        }
+      },
+      {
+        "test": "tests/peripherals/SiLabs/BUFC.robot",
+        "params": {
+          "BUFC_VERSION": "4"
+        }
+      },
+      {
+        "test": "tests/peripherals/SiLabs/BUFC.robot",
+        "params": {
+          "BUFC_VERSION": "5"
+        }
+      }
     ]
   },
   "unit-test-lpw-rx": {

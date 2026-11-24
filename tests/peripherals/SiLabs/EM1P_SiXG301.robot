@@ -1,5 +1,5 @@
 *** Settings ***
-Resource                      ${RENODEKEYWORDS}
+Test Setup                      Create Machine
 
 *** Comments ***
 EM1P coverage for the SiXG301 EMU and its RISC-V radio sequencer.
@@ -49,20 +49,14 @@ ${HOST_STACK}                   0x20010000
 ${HOST_CODE}                    0x20000100
 ${HOST_IRQ0}                    0x20000200
 # The CPU model reports a branch-to-self as WFI, so an idle loop has to do some
-# work or leaving WFI puts the core straight back to sleep. "movs r0, #1; subs r0, #1; b subs".
-${SPIN_LOOP_0}                  0x38012101
-${SPIN_LOOP_1}                  0x0000E7FD
-# "wfi" followed by the same loop.
-${WFI_LOOP_0}                   0x2101BF30
-${WFI_LOOP_1}                   0xE7FD3801
+# work or leaving WFI puts the core straight back to sleep.
+${SPIN_LOOP}                    movs r1, #1; 1: subs r0, #1; b 1b
 
-# RISC-V sequencer image in sequencer RAM. "addi t0, t0, 1; j .-4" spins, and the sleep entry
+# RISC-V sequencer image in sequencer RAM. SEQ_SPIN spins, and the sleep entry
 # is "wfi" followed by the same loop.
 ${SEQ_SPIN}                     0xA0000100
 ${SEQ_SLEEP}                    0xA0000200
-${RV_ADDI_T0}                   0x00128293
-${RV_JUMP_BACK}                 0xFFDFF06F
-${RV_WFI}                       0x10500073
+${RV_SPIN_LOOP}                 1: addi t0, t0, 1; j 1b
 
 ${RUN_TIME}                     0.0001
 ${QUANTUM}                      0.00001
@@ -122,42 +116,28 @@ ${SYST_PAST_RELOAD}             0.04
 
 *** Keywords ***
 Create Machine
+    Renode Test Setup
     Execute Command             mach create "test"
     Execute Command             machine LoadPlatformDescription @${PLATFORM_FILE}
     Execute Command             emulation SetQuantum "${QUANTUM}"
+    # Run the host core and the radio sequencer in a fixed order within each quantum
+    Execute Command             emulation SetGlobalSerialExecution true
     Execute Command             sysbus.cpu IsHalted true
-    Install Host Image
+    Execute Command             sysbus.cpu VectorTableOffset 0x20000000
+    Execute Command             sysbus WriteDoubleWord 0x20000000 ${HOST_STACK}
+    Execute Command             sysbus WriteDoubleWord 0x20000004 ${{${HOST_CODE} | 1}}
+    Execute Command             sysbus WriteDoubleWord 0x20000040 ${{${HOST_IRQ0} | 1}}
+    Execute Command             cpu AssembleBlock ${HOST_CODE} "wfi; ${SPIN_LOOP}"
+    Execute Command             cpu AssembleBlock ${HOST_IRQ0} "${SPIN_LOOP}"
+    Execute Command             sysbus.nvic WriteDoubleWord ${NVIC_ISER} 0x1
     # The radio connects to the EMU on its first EM1PCSR update. Toggle the software request so
     # that happens, then leave the request clear.
     Write EM1PCSR               ${RAC_EM1P_SWCTRL}
     Write EM1PCSR               0x0
 
-Install Host Image
-    Execute Command             sysbus.cpu VectorTableOffset 0x20000000
-    Execute Command             sysbus WriteDoubleWord 0x20000000 ${HOST_STACK}
-    Execute Command             sysbus WriteDoubleWord 0x20000004 0x20000101
-    Execute Command             sysbus WriteDoubleWord 0x20000040 0x20000201
-    Execute Command             sysbus WriteDoubleWord ${HOST_CODE} ${WFI_LOOP_0}
-    Execute Command             sysbus WriteDoubleWord 0x20000104 ${WFI_LOOP_1}
-    Execute Command             sysbus WriteDoubleWord ${HOST_IRQ0} ${SPIN_LOOP_0}
-    Execute Command             sysbus WriteDoubleWord 0x20000204 ${SPIN_LOOP_1}
-    Execute Command             sysbus.nvic WriteDoubleWord ${NVIC_ISER} 0x1
-
-Install Sequencer Image
-    Execute Command             sysbus WriteDoubleWord ${SEQ_SPIN} ${RV_ADDI_T0}
-    Execute Command             sysbus WriteDoubleWord 0xA0000104 ${RV_JUMP_BACK}
-    Execute Command             sysbus WriteDoubleWord ${SEQ_SLEEP} ${RV_WFI}
-    Execute Command             sysbus WriteDoubleWord 0xA0000204 ${RV_ADDI_T0}
-    Execute Command             sysbus WriteDoubleWord 0xA0000208 ${RV_JUMP_BACK}
-    Execute Command             sysbus WriteDoubleWord ${RVCFG1_BOOTADDR} ${SEQ_SPIN}
-
 Enter Host Sleep
     [Arguments]                 ${deep}
-    IF  ${deep}
-        Execute Command         sysbus.nvic WriteDoubleWord ${NVIC_SCR} ${SCR_SLEEPDEEP}
-    ELSE
-        Execute Command         sysbus.nvic WriteDoubleWord ${NVIC_SCR} 0x0
-    END
+    Execute Command             sysbus.nvic WriteDoubleWord ${NVIC_SCR} ${{${SCR_SLEEPDEEP} if ${deep} else 0}}
     Execute Command             sysbus.cpu PC ${HOST_CODE}
     Execute Command             sysbus.cpu SP ${HOST_STACK}
     Execute Command             sysbus.cpu IsHalted false
@@ -174,18 +154,29 @@ Wake Host With Interrupt Line
     Execute Command             emulation RunFor "${RUN_TIME}"
 
 Release Sequencer
-    Install Sequencer Image
+    Execute Command             sysbus.seqcpu AssembleBlock ${SEQ_SPIN} "${RV_SPIN_LOOP}"
+    Execute Command             sysbus.seqcpu AssembleBlock ${SEQ_SLEEP} "wfi; ${RV_SPIN_LOOP}"
+    Execute Command             sysbus WriteDoubleWord ${RVCFG1_BOOTADDR} ${SEQ_SPIN}
     Execute Command             sysbus WriteDoubleWord ${RAC_CTRL} ${RAC_CPUWAITDIS}
+    Execute Command             emulation RunFor "${RUN_TIME}"
+
+Put Sequencer To Sleep
+    Execute Command             sysbus.seqcpu PC ${SEQ_SLEEP}
     Execute Command             emulation RunFor "${RUN_TIME}"
 
 Write EM1PCSR
     [Arguments]                 ${value}
     Execute Command             sysbus WriteDoubleWord ${RAC_EM1PCSR} ${value}
 
-Read EM1PCSR
-    ${value}=                   Execute Command  sysbus ReadDoubleWord ${RAC_EM1PCSR}
-    ${value}=                   Convert To Integer  ${value}
-    RETURN                      ${value}
+EM1PCSR Should Be
+    [Arguments]                 ${expected}
+    ${em1pcsr}=                 Execute Command  sysbus ReadDoubleWord ${RAC_EM1PCSR}
+    Should Be Equal As Integers  ${em1pcsr}  ${expected}
+
+Bit Should Be
+    [Arguments]                 ${peripheral}  ${offset}  ${mask}  ${expected}
+    ${value}=                   Execute Command  ${peripheral} ReadDoubleWord ${offset}
+    Should Be Equal As Strings  ${{bool(int($value, 16) & ${mask})}}  ${expected}
 
 Energy Mode Should Be
     [Arguments]                 ${expected}
@@ -194,23 +185,15 @@ Energy Mode Should Be
     Should Start With           ${mode}  ${expected}\n
 
 Sequencer Should Be Running
-    ${em1pcsr}=                 Read EM1PCSR
-    ${hwreq}=                   Evaluate  (${em1pcsr} & ${RAC_EM1P_HWREQ}) != 0
-    Should Be Equal As Strings  ${hwreq}  True
+    Bit Should Be               sysbus  ${RAC_EM1PCSR}  ${RAC_EM1P_HWREQ}  True
 
 Sequencer Sleeping Should Be
     [Arguments]                 ${expected}
-    ${status}=                  Execute Command  sysbus ReadDoubleWord ${RAC_STATUS}
-    ${status}=                  Convert To Integer  ${status}
-    ${bit}=                     Evaluate  (${status} & ${RAC_STATUS_SEQSLEEPING}) != 0
-    Should Be Equal As Strings  ${bit}  ${expected}
+    Bit Should Be               sysbus  ${RAC_STATUS}  ${RAC_STATUS_SEQSLEEPING}  ${expected}
 
 EM1P Status Should Be
     [Arguments]                 ${expected}
-    ${status}=                  Execute Command  sysbus ReadDoubleWord ${EMU_STATUS}
-    ${status}=                  Convert To Integer  ${status}
-    ${bit}=                     Evaluate  (${status} & ${EMU_STATUS_EM1P}) != 0
-    Should Be Equal As Strings  ${bit}  ${expected}
+    Bit Should Be               sysbus  ${EMU_STATUS}  ${EMU_STATUS_EM1P}  ${expected}
 
 Host Clocks Should Be
     [Arguments]                 ${expected}
@@ -228,21 +211,11 @@ Start TIMER0
 
 Read TIMER0 Count
     ${value}=                   Execute Command  sysbus.timer0 ReadDoubleWord ${TIMER0_CNT}
-    ${value}=                   Convert To Integer  ${value}
     RETURN                      ${value}
-
-Start SysTick
-    Execute Command             sysbus.nvic WriteDoubleWord ${SYST_RVR} ${SYST_RELOAD}
-    # Any write to CVR loads the reload value, otherwise the first period is the 24-bit maximum.
-    Execute Command             sysbus.nvic WriteDoubleWord ${SYST_CVR} 0x0
-    Execute Command             sysbus.nvic WriteDoubleWord ${SYST_CSR} ${SYST_CSR_ENABLE_CORECLK}
 
 SysTick Should Have Counted
     [Arguments]                 ${expected}
-    ${csr}=                     Execute Command  sysbus.nvic ReadDoubleWord ${SYST_CSR}
-    ${csr}=                     Convert To Integer  ${csr}
-    ${counted}=                 Evaluate  (${csr} & ${SYST_CSR_COUNTFLAG}) != 0
-    Should Be Equal As Strings  ${counted}  ${expected}
+    Bit Should Be               sysbus.nvic  ${SYST_CSR}  ${SYST_CSR_COUNTFLAG}  ${expected}
 
 Configure EUSART0
     [Arguments]                 ${cfg1}
@@ -258,57 +231,37 @@ Read EUSART0 Frame
 
 Write LDMA Register
     [Arguments]                 ${base}  ${offset}  ${value}
-    ${address}=                 Evaluate  ${base} + ${offset}
-    Execute Command             sysbus WriteDoubleWord ${address} ${value}
+    Execute Command             sysbus WriteDoubleWord ${{${base} + ${offset}}} ${value}
 
-Read Word
-    [Arguments]                 ${address}
-    ${value}=                   Execute Command  sysbus ReadDoubleWord ${address}
-    ${value}=                   Convert To Integer  ${value}
-    RETURN                      ${value}
-
-Prepare LDMA Word Copy
-    Execute Command             sysbus WriteDoubleWord ${LDMA_SOURCE} ${LDMA_PATTERN}
+Prepare LDMA Channel 0
+    [Arguments]                 ${ctrl}  ${source}
     Execute Command             sysbus WriteDoubleWord ${LDMA_TARGET} 0x0
-    Write LDMA Register         ${LDMA_BASE}  ${LDMA_CH0_CTRL}  ${LDMA_CTRL_WORD_COPY}
-    Write LDMA Register         ${LDMA_BASE}  ${LDMA_CH0_SRC}  ${LDMA_SOURCE}
+    Write LDMA Register         ${LDMA_BASE}  ${LDMA_CH0_CTRL}  ${ctrl}
+    Write LDMA Register         ${LDMA_BASE}  ${LDMA_CH0_SRC}  ${source}
     Write LDMA Register         ${LDMA_BASE}  ${LDMA_CH0_DST}  ${LDMA_TARGET}
     Write LDMA Register         ${LDMA_BASE}  ${LDMA_IEN}  0x1
     Write LDMA Register         ${LDMA_BASE}  ${LDMA_CHEN}  0x1
+
+Prepare LDMA Word Copy
+    Execute Command             sysbus WriteDoubleWord ${LDMA_SOURCE} ${LDMA_PATTERN}
+    Prepare LDMA Channel 0      ${LDMA_CTRL_WORD_COPY}  ${LDMA_SOURCE}
 
 Request LDMA Word Copy
     Write LDMA Register         ${LDMA_BASE}  ${LDMA_SWREQ}  0x1
 
-Prepare LDMA EUSART0 Receive
-    Execute Command             sysbus WriteDoubleWord ${LDMA_TARGET} 0x0
-    Write LDMA Register         ${LDMAXBAR_BASE}  ${LDMAXBAR_CH0_REQSEL}  ${LDMA_REQSEL_EUSART0_RXFL}
-    Write LDMA Register         ${LDMA_BASE}  ${LDMA_CH0_CTRL}  ${LDMA_CTRL_BYTE_FROM_FIXED}
-    Write LDMA Register         ${LDMA_BASE}  ${LDMA_CH0_SRC}  ${EUSART0_RXDATA_ADDRESS}
-    Write LDMA Register         ${LDMA_BASE}  ${LDMA_CH0_DST}  ${LDMA_TARGET}
-    Write LDMA Register         ${LDMA_BASE}  ${LDMA_IEN}  0x1
-    Write LDMA Register         ${LDMA_BASE}  ${LDMA_CHEN}  0x1
-
 LDMA Target Should Be
     [Arguments]                 ${expected}
-    ${value}=                   Read Word  ${LDMA_TARGET}
+    ${value}=                   Execute Command  sysbus ReadDoubleWord ${LDMA_TARGET}
     Should Be Equal As Integers  ${value}  ${expected}
 
 LDMA Done Flag Should Be
     [Arguments]                 ${expected}
-    ${address}=                 Evaluate  ${LDMA_BASE} + ${LDMA_IF}
-    ${flags}=                   Read Word  ${address}
-    ${done}=                    Evaluate  (${flags} & 0x1) != 0
-    Should Be Equal As Strings  ${done}  ${expected}
+    Bit Should Be               sysbus  ${{${LDMA_BASE} + ${LDMA_IF}}}  0x1  ${expected}
 
 Timer Should Be Frozen In EM1P
     [Arguments]                 ${host_clock_request}
-    Create Machine
     Start TIMER0
-    ${request}=                 Set Variable  ${RAC_EM1P_SWCTRL}
-    IF  ${host_clock_request}
-        ${request}=             Evaluate  ${RAC_EM1P_SWCTRL} | ${RAC_EM1P_MCU_SWCTRL}
-    END
-    Write EM1PCSR               ${request}
+    Write EM1PCSR               ${{${RAC_EM1P_SWCTRL} | (${RAC_EM1P_MCU_SWCTRL} if ${host_clock_request} else 0)}}
     Enter Host Sleep            True
     Energy Mode Should Be       EM1P
     HostAll Clocks Should Be    False
@@ -325,23 +278,15 @@ Timer Should Be Frozen In EM1P
 
 Configure WDOG
     [Arguments]                 ${em2run}
-    IF  ${em2run}
-        Execute Command         sysbus.wdog0 WriteDoubleWord ${WDOG0_CFG} ${WDOG_CFG_EM2RUN}
-    ELSE
-        Execute Command         sysbus.wdog0 WriteDoubleWord ${WDOG0_CFG} ${WDOG_CFG_EM1RUN}
-    END
+    Execute Command             sysbus.wdog0 WriteDoubleWord ${WDOG0_CFG} ${{${WDOG_CFG_EM2RUN} if ${em2run} else ${WDOG_CFG_EM1RUN}}}
     Execute Command             sysbus.wdog0 WriteDoubleWord ${WDOG0_EN} 0x1
 
 WDOG Timeout Should Be
     [Arguments]                 ${expected}
-    ${flags}=                   Execute Command  sysbus.wdog0 ReadDoubleWord ${WDOG0_IF}
-    ${flags}=                   Convert To Integer  ${flags}
-    ${timeout}=                 Evaluate  (${flags} & 0x1) != 0
-    Should Be Equal As Strings  ${timeout}  ${expected}
+    Bit Should Be               sysbus.wdog0  ${WDOG0_IF}  0x1  ${expected}
 
 *** Test Cases ***
-Deep Sleep Is EM2 Until Software Requests EM1P
-    Create Machine
+Should Enter EM2 In Deep Sleep Until Software Requests EM1P
     Energy Mode Should Be       EM0
     EM1P Status Should Be       False
 
@@ -350,8 +295,7 @@ Deep Sleep Is EM2 Until Software Requests EM1P
     EM1P Status Should Be       False
     Host Clocks Should Be       False
     HostAll Clocks Should Be    False
-    ${em1pcsr}=                 Read EM1PCSR
-    Should Be Equal As Integers  ${em1pcsr}  0x0
+    EM1PCSR Should Be           0x0
 
     # Software control with the request enabled. The ack follows the request at once.
     Write EM1PCSR               ${RAC_EM1P_SWCTRL}
@@ -359,9 +303,7 @@ Deep Sleep Is EM2 Until Software Requests EM1P
     EM1P Status Should Be       True
     Host Clocks Should Be       False
     HostAll Clocks Should Be    False
-    ${em1pcsr}=                 Read EM1PCSR
-    ${expected}=                Evaluate  ${RAC_EM1P_SWCTRL} | ${RAC_EM1P_REQ} | ${RAC_EM1P_ACK}
-    Should Be Equal As Integers  ${em1pcsr}  ${expected}
+    EM1PCSR Should Be           ${{${RAC_EM1P_SWCTRL} | ${RAC_EM1P_REQ} | ${RAC_EM1P_ACK}}}
 
     Write EM1PCSR               0x0
     Energy Mode Should Be       EM2
@@ -372,17 +314,14 @@ Deep Sleep Is EM2 Until Software Requests EM1P
     Host Clocks Should Be       True
     HostAll Clocks Should Be    True
 
-Running Sequencer Holds EM1P Until It Sleeps
-    Create Machine
+Should Hold EM1P While The Sequencer Runs
     # CPUWAIT holds the sequencer, and SEQSLEEPING stays clear until it executes WFI.
-    Sequencer Sleeping Should Be    False
+    Sequencer Sleeping Should Be  False
     Release Sequencer
-    Sequencer Sleeping Should Be    False
+    Sequencer Sleeping Should Be  False
     # The host is halted, so a sequencer request on its own leaves the system in EM0.
     Energy Mode Should Be       EM0
-    ${em1pcsr}=                 Read EM1PCSR
-    ${expected}=                Evaluate  ${RAC_EM1P_REQ} | ${RAC_EM1P_ACK} | ${RAC_EM1P_HWREQ}
-    Should Be Equal As Integers  ${em1pcsr}  ${expected}
+    EM1PCSR Should Be           ${{${RAC_EM1P_REQ} | ${RAC_EM1P_ACK} | ${RAC_EM1P_HWREQ}}}
 
     Enter Host Sleep            True
     Energy Mode Should Be       EM1P
@@ -391,50 +330,42 @@ Running Sequencer Holds EM1P Until It Sleeps
 
     # The sequencer goes to WFI with the radio idle, which clears the hardware request. The
     # RISC-V subsystem accepts the quiescence request while the core waits in WFI.
-    Execute Command             sysbus.seqcpu PC ${SEQ_SLEEP}
-    Execute Command             emulation RunFor "${RUN_TIME}"
+    Put Sequencer To Sleep
     Energy Mode Should Be       EM2
     EM1P Status Should Be       False
-    ${em1pcsr}=                 Read EM1PCSR
-    Should Be Equal As Integers  ${em1pcsr}  0x0
+    EM1PCSR Should Be           0x0
     # EM2 powers the sequencer down, so it is no longer in WFI.
-    Sequencer Sleeping Should Be    False
+    Sequencer Sleeping Should Be  False
 
     Wake Host
     Energy Mode Should Be       EM0
 
-Sequencer Deep Sleep Lets The Host Enter EM2 And Resets The Sequencer
-    Create Machine
+Should Enter EM2 And Reset The Sequencer When It Sleeps
     Release Sequencer
     Enter Host Sleep            True
     Energy Mode Should Be       EM1P
 
     # The sequencer goes to WFI with the radio idle, which clears the hardware request. WFI alone lets the
     # RISC-V subsystem accept the EM2 request.
-    Execute Command             sysbus.seqcpu PC ${SEQ_SLEEP}
-    Execute Command             emulation RunFor "${RUN_TIME}"
+    Put Sequencer To Sleep
     Energy Mode Should Be       EM2
     EM1P Status Should Be       False
-    ${em1pcsr}=                 Read EM1PCSR
-    Should Be Equal As Integers  ${em1pcsr}  0x0
+    EM1PCSR Should Be           0x0
     # EM2 powers the sequencer down, so it is no longer in WFI.
-    Sequencer Sleeping Should Be    False
+    Sequencer Sleeping Should Be  False
 
     # Leaving EM2 powers the sequencer up again from the retained boot address.
     Wake Host
     Energy Mode Should Be       EM0
     Sequencer Should Be Running
-    Sequencer Sleeping Should Be    False
+    Sequencer Sleeping Should Be  False
 
-Sequencer Restarts When EM2 Exits To EM1P
-    Create Machine
+Should Restart The Sequencer When EM2 Exits To EM1P
     Release Sequencer
     Enter Host Sleep            True
-    Execute Command             sysbus.seqcpu PC ${SEQ_SLEEP}
-    Execute Command             emulation RunFor "${RUN_TIME}"
+    Put Sequencer To Sleep
     Energy Mode Should Be       EM2
-    ${em1pcsr}=                 Read EM1PCSR
-    Should Be Equal As Integers  ${em1pcsr}  0x0
+    EM1PCSR Should Be           0x0
 
     # Software takes EM1P control while the host stays in deep sleep. The powered up sequencer
     # starts again and requests EM1P on its own.
@@ -443,10 +374,9 @@ Sequencer Restarts When EM2 Exits To EM1P
     Sequencer Should Be Running
     Write EM1PCSR               0x0
     Energy Mode Should Be       EM1P
-    Sequencer Sleeping Should Be    False
+    Sequencer Sleeping Should Be  False
 
-Sleep Without Deep Sleep Stays EM1
-    Create Machine
+Should Stay In EM1 Without Deep Sleep
     Write EM1PCSR               ${RAC_EM1P_SWCTRL}
     Enter Host Sleep            False
     Energy Mode Should Be       EM1
@@ -457,21 +387,18 @@ Sleep Without Deep Sleep Stays EM1
     Wake Host
     Energy Mode Should Be       EM0
 
-MCUEM1PMODE Enables Host Clocks In EM1P
-    Create Machine
+Should Enable Host Clocks In EM1P With MCUEM1PMODE
     Write EM1PCSR               ${RAC_EM1P_SWCTRL}
     Enter Host Sleep            True
     Energy Mode Should Be       EM1P
     Host Clocks Should Be       False
 
-    ${request}=                 Evaluate  ${RAC_EM1P_SWCTRL} | ${RAC_EM1P_MCU_SWCTRL}
-    Write EM1PCSR               ${request}
+    Write EM1PCSR               ${{${RAC_EM1P_SWCTRL} | ${RAC_EM1P_MCU_SWCTRL}}}
     Energy Mode Should Be       EM1P
     Host Clocks Should Be       True
     HostAll Clocks Should Be    False
 
-    ${disabled}=                Evaluate  ${RAC_EM1P_SWCTRL} | ${RAC_EM1P_MCU_SWCTRL} | ${RAC_EM1P_MCU_DISSWREQ}
-    Write EM1PCSR               ${disabled}
+    Write EM1PCSR               ${{${RAC_EM1P_SWCTRL} | ${RAC_EM1P_MCU_SWCTRL} | ${RAC_EM1P_MCU_DISSWREQ}}}
     Energy Mode Should Be       EM1P
     Host Clocks Should Be       False
 
@@ -479,8 +406,7 @@ MCUEM1PMODE Enables Host Clocks In EM1P
     Energy Mode Should Be       EM0
     Host Clocks Should Be       True
 
-EM2RUN Clear Freezes WDOG In EM1P
-    Create Machine
+Should Freeze WDOG In EM1P With EM2RUN Clear
     Configure WDOG              False
     Write EM1PCSR               ${RAC_EM1P_SWCTRL}
     Enter Host Sleep            True
@@ -493,8 +419,7 @@ EM2RUN Clear Freezes WDOG In EM1P
     Execute Command             emulation RunFor "${WDOG_PAST_TIMEOUT}"
     WDOG Timeout Should Be      True
 
-EM2RUN Set Lets WDOG Run In EM1P
-    Create Machine
+Should Run WDOG In EM1P With EM2RUN Set
     Configure WDOG              True
     Write EM1PCSR               ${RAC_EM1P_SWCTRL}
     Enter Host Sleep            True
@@ -503,14 +428,13 @@ EM2RUN Set Lets WDOG Run In EM1P
     Energy Mode Should Be       EM1P
     WDOG Timeout Should Be      True
 
-Timers Stop In EM1P Without Host Clock Request
+Should Stop Timers In EM1P Without Host Clock Request
     Timer Should Be Frozen In EM1P  False
 
-Timers Stay Stopped In EM1P With MCUEM1PMODE
+Should Stop Timers In EM1P With MCUEM1PMODE
     Timer Should Be Frozen In EM1P  True
 
-Timers Stop In EM2
-    Create Machine
+Should Stop Timers In EM2
     Start TIMER0
     Enter Host Sleep            True
     Energy Mode Should Be       EM2
@@ -519,8 +443,7 @@ Timers Stop In EM2
     ${after}=                   Read TIMER0 Count
     Should Be Equal As Integers  ${after}  ${before}
 
-Timers Run In EM1
-    Create Machine
+Should Run Timers In EM1
     Start TIMER0
     Enter Host Sleep            False
     Energy Mode Should Be       EM1
@@ -529,11 +452,12 @@ Timers Run In EM1
     ${after}=                   Read TIMER0 Count
     Should Not Be Equal As Integers  ${after}  ${before}
 
-SysTick Is Stopped In EM1P
-    Create Machine
-    Start SysTick
-    ${request}=                 Evaluate  ${RAC_EM1P_SWCTRL} | ${RAC_EM1P_MCU_SWCTRL}
-    Write EM1PCSR               ${request}
+Should Stop SysTick In EM1P
+    Execute Command             sysbus.nvic WriteDoubleWord ${SYST_RVR} ${SYST_RELOAD}
+    # Any write to CVR loads the reload value, otherwise the first period is the 24-bit maximum.
+    Execute Command             sysbus.nvic WriteDoubleWord ${SYST_CVR} 0x0
+    Execute Command             sysbus.nvic WriteDoubleWord ${SYST_CSR} ${SYST_CSR_ENABLE_CORECLK}
+    Write EM1PCSR               ${{${RAC_EM1P_SWCTRL} | ${RAC_EM1P_MCU_SWCTRL}}}
     Enter Host Sleep            True
     Energy Mode Should Be       EM1P
     Execute Command             emulation RunFor "${SYST_PAST_RELOAD}"
@@ -545,8 +469,7 @@ SysTick Is Stopped In EM1P
     Execute Command             emulation RunFor "${SYST_PAST_RELOAD}"
     SysTick Should Have Counted  True
 
-EUSART0 RX DMA Wakeup Holds EM1P Until The Frame Is Read
-    Create Machine
+Should Hold EM1P On EUSART0 RX DMA Wakeup Until The Frame Is Read
     Configure EUSART0           ${EUSART_CFG1_RXDMAWU}
     Enter Host Sleep            True
     Energy Mode Should Be       EM2
@@ -563,8 +486,7 @@ EUSART0 RX DMA Wakeup Holds EM1P Until The Frame Is Read
     EM1P Status Should Be       False
     Host Clocks Should Be       False
 
-EUSART0 Frame Without RXDMAWU Leaves The Host In EM2
-    Create Machine
+Should Stay In EM2 On EUSART0 Frame Without RXDMAWU
     Configure EUSART0           0x0
     Enter Host Sleep            True
     Energy Mode Should Be       EM2
@@ -573,8 +495,7 @@ EUSART0 Frame Without RXDMAWU Leaves The Host In EM2
     Energy Mode Should Be       EM2
     Host Clocks Should Be       False
 
-EUSART0 RX DMA Wakeup Waits For RXFIW Frames
-    Create Machine
+Should Wait For RXFIW Frames Before EUSART0 RX DMA Wakeup
     Configure EUSART0           ${EUSART_CFG1_RXDMAWU_RXFIW_1}
     Enter Host Sleep            True
     Energy Mode Should Be       EM2
@@ -588,8 +509,7 @@ EUSART0 RX DMA Wakeup Waits For RXFIW Frames
     Read EUSART0 Frame
     Energy Mode Should Be       EM2
 
-EUSART0 TX DMA Wakeup Holds EM1P While Enabled
-    Create Machine
+Should Hold EM1P On EUSART0 TX DMA Wakeup While Enabled
     Configure EUSART0           ${EUSART_CFG1_TXDMAWU}
     Enter Host Sleep            True
     # TXDMAWU alone does not wake. The transmitter has to be enabled.
@@ -621,16 +541,14 @@ EUSART0 TX DMA Wakeup Holds EM1P While Enabled
     Energy Mode Should Be       EM2
     Host Clocks Should Be       False
 
-Only EUSART0 Requests EM1P
-    Create Machine
+Should Request EM1P Only From EUSART0
     Execute Command             sysbus.eusart1 WriteDoubleWord ${EUSART0_ENABLE} 0x1
     Execute Command             sysbus.eusart1 WriteDoubleWord ${EUSART0_CFG1} ${EUSART_CFG1_TXDMAWU}
     Execute Command             sysbus.eusart1 WriteDoubleWord ${EUSART0_CMD} ${EUSART_CMD_TXEN}
     Enter Host Sleep            True
     Energy Mode Should Be       EM2
 
-LDMA Request Waits For Host Clocks In EM1P
-    Create Machine
+Should Hold LDMA Request Until Host Clocks Run In EM1P
     Write EM1PCSR               ${RAC_EM1P_SWCTRL}
     Enter Host Sleep            True
     Energy Mode Should Be       EM1P
@@ -641,14 +559,12 @@ LDMA Request Waits For Host Clocks In EM1P
     LDMA Target Should Be       0x0
     LDMA Done Flag Should Be    False
 
-    ${request}=                 Evaluate  ${RAC_EM1P_SWCTRL} | ${RAC_EM1P_MCU_SWCTRL}
-    Write EM1PCSR               ${request}
+    Write EM1PCSR               ${{${RAC_EM1P_SWCTRL} | ${RAC_EM1P_MCU_SWCTRL}}}
     Host Clocks Should Be       True
     LDMA Target Should Be       ${LDMA_PATTERN}
     LDMA Done Flag Should Be    True
 
-LDMA Request Waits For Host Clocks In EM2
-    Create Machine
+Should Hold LDMA Request Until Host Clocks Run In EM2
     Enter Host Sleep            True
     Energy Mode Should Be       EM2
     Prepare LDMA Word Copy
@@ -661,8 +577,7 @@ LDMA Request Waits For Host Clocks In EM2
     LDMA Target Should Be       ${LDMA_PATTERN}
     LDMA Done Flag Should Be    True
 
-LDMA Runs Immediately While The Host Clocks Run
-    Create Machine
+Should Run LDMA Immediately While The Host Clocks Run
     Enter Host Sleep            False
     Energy Mode Should Be       EM1
     Prepare LDMA Word Copy
@@ -670,10 +585,10 @@ LDMA Runs Immediately While The Host Clocks Run
     Request LDMA Word Copy
     LDMA Target Should Be       ${LDMA_PATTERN}
 
-LDMA Moves EUSART0 Data In EM1P While The Host Sleeps
-    Create Machine
+Should Move EUSART0 Data With LDMA In EM1P While The Host Sleeps
     Configure EUSART0           ${EUSART_CFG1_RXDMAWU}
-    Prepare LDMA EUSART0 Receive
+    Write LDMA Register         ${LDMAXBAR_BASE}  ${LDMAXBAR_CH0_REQSEL}  ${LDMA_REQSEL_EUSART0_RXFL}
+    Prepare LDMA Channel 0      ${LDMA_CTRL_BYTE_FROM_FIXED}  ${EUSART0_RXDATA_ADDRESS}
     Enter Host Sleep            True
     Energy Mode Should Be       EM2
 

@@ -1,181 +1,137 @@
+*** Settings ***
+Test Setup                      Create Machine
+
 *** Variables ***
 ${FREQUENCY}                    25000
-${REPL_STRING}=                 SEPARATOR=
-...  """                                                               ${\n}
-...  rtcc: Timers.SiLabs_RTCC_1 @ sysbus <0x0, +0x4000>                ${\n}
-...  ${SPACE*4}frequency: ${FREQUENCY}                                 ${\n}
+${PLATFORM}                     SEPARATOR=\n
+...  """
+...  rtcc: Timers.SiLabs_RTCC_1 @ sysbus <0x0, +0x4000>
+...  ${SPACE*4}frequency: ${FREQUENCY}
 ...  """
 # Registers
-${CFG_REG}                      0x0008
-${CMD_REG}                      0x000C
-${STATUS_REG}                   0x0010
-${IF_REG}                       0x0014
-${IEN_REG}                      0x0018
-${CNT_REG}                      0x0020
-${CC0_CTRL_REG}                 0x0030
-${CC0_OUTPUT_COMPARE_REG}       0x0034
-${CC1_CTRL_REG}                 0x003C
-${CC1_OUTPUT_COMPARE_REG}       0x0040
-${CC2_CTRL_REG}                 0x0048
-${CC2_OUTPUT_COMPARE_REG}       0x004C
+${CFG}                          0x0008
+${CMD}                          0x000C
+${STATUS}                       0x0010
+${IF}                           0x0014
+${IEN}                          0x0018
+${CNT}                          0x0020
+${CC0_CTRL}                     0x0030
+${CC0_OUTPUT_COMPARE}           0x0034
+${CC1_CTRL}                     0x003C
+${CC1_OUTPUT_COMPARE}           0x0040
 
 # Config register fields
-${CONFIG_PRECNT_CC0_TOP_VALUE_ENABLE}  0x00000002
-${CONFIG_CNT_CC1_TOP_VALUE_ENABLE}     0x00000004
+${CONFIG_CNT_CC1_TOP_VALUE_ENABLE}  0x00000004
 
 # Status register fields
-${STATUS_RUNNING}                      0x00000001
-
+${STATUS_RUNNING}               0x00000001
 
 *** Keywords ***
 Create Machine
+    Renode Test Setup
     Execute Command             mach create "test"
-    Execute Command             machine LoadPlatformDescriptionFromString ${REPL_STRING}
+    Execute Command             machine LoadPlatformDescriptionFromString ${PLATFORM}
 
-Start Command
-    Execute Command             sysbus.rtcc WriteDoubleWord ${CMD_REG} 0x1
+Register Should Be
+    [Arguments]                 ${register}  ${expected}
+    ${value}=                   Execute Command  rtcc ReadDoubleWord ${register}
+    Should Be Equal As Integers  ${value}  ${expected}
 
-Stop Command
-    Execute Command             sysbus.rtcc WriteDoubleWord ${CMD_REG} 0x2
+IRQ Should Be
+    [Arguments]                 ${state}
+    ${irq}=                     Execute Command  rtcc IRQ
+    Should Contain              ${irq}  GPIO: ${state}
 
-Assert IRQ Is Set
-    ${irqState}=                    Execute Command  sysbus.rtcc IRQ
-    Should Contain                  ${irqState}  GPIO: set
-
-Assert IRQ Is Unset
-    ${irqState}=                    Execute Command  sysbus.rtcc IRQ
-    Should Contain                  ${irqState}  GPIO: unset
-
+# Start the Counter
+Start Counter
+    Execute Command             rtcc WriteDoubleWord ${CMD} 0x1
+    Register Should Be          ${STATUS}  ${STATUS_RUNNING}
 
 *** Test Cases ***
-Start/Stop Counter
-    Create Machine
-    # Basic configuration (prescaler mode, divider set to 1, not PRECNT / CNT top values)
-    Execute Command               sysbus.rtcc WriteDoubleWord ${CFG_REG} 0
-    # Start the Counter
-    Start Command
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers   ${read_val}  ${STATUS_RUNNING}
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${CNT_REG}
-    Should Be Equal As Integers   ${read_val}  0
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 1
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    Assert IRQ Is Unset
+Should Start And Stop Counter
+    # Basic configuration (prescaler mode, divider set to 1, no PRECNT / CNT top values)
+    Execute Command             rtcc WriteDoubleWord ${CFG} 0
+    Start Counter
+    Register Should Be          ${CNT}  0
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${FREQUENCY}
+    IRQ Should Be               unset
     # Stop the Counter
-    Stop Command
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers   ${read_val}  0
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${CNT_REG}
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    Assert IRQ Is Unset
+    Execute Command             rtcc WriteDoubleWord ${CMD} 0x2
+    Register Should Be          ${STATUS}  0
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${FREQUENCY}
+    IRQ Should Be               unset
     # Start the Counter (again)
-    Start Command
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers   ${read_val}  ${STATUS_RUNNING}
-    Execute Command               emulation RunFor "1"
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 2
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    Assert IRQ Is Unset
+    Start Counter
+    Execute Command             emulation RunFor "1"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} * 2 }}
+    IRQ Should Be               unset
 
-Main Counter Tick Interrupt
-    Create Machine
-    # Basic configuration (prescaler mode, divider set to 1, not PRECNT / CNT top values)
-    Execute Command               sysbus.rtcc WriteDoubleWord ${CFG_REG} 0
+Should Raise Main Counter Tick Interrupt
+    # Basic configuration (prescaler mode, divider set to 1, no PRECNT / CNT top values)
+    Execute Command             rtcc WriteDoubleWord ${CFG} 0
     # Enable main counter tick interrupt
-    Execute Command               sysbus.rtcc WriteDoubleWord ${IEN_REG} 0x2
-    # Start the Counter
-    Start Command
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers   ${read_val}  ${STATUS_RUNNING}
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${CNT_REG}
-    Should Be Equal As Integers   ${read_val}  0
-    Execute Command               emulation RunFor "0.001"
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 0.001
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    Assert IRQ Is Set
-    Execute Command               sysbus.rtcc WriteDoubleWord ${IF_REG} 0x0
-    Assert IRQ Is Unset
-    Execute Command               emulation RunFor "0.001"
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 0.002
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    Assert IRQ Is Set
-    Execute Command               sysbus.rtcc WriteDoubleWord ${IF_REG} 0x0
-    Assert IRQ Is Unset
+    Execute Command             rtcc WriteDoubleWord ${IEN} 0x2
+    Start Counter
+    Register Should Be          ${CNT}  0
+    Execute Command             emulation RunFor "0.001"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} * 0.001 }}
+    IRQ Should Be               set
+    Execute Command             rtcc WriteDoubleWord ${IF} 0x0
+    IRQ Should Be               unset
+    Execute Command             emulation RunFor "0.001"
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} * 0.002 }}
+    IRQ Should Be               set
+    Execute Command             rtcc WriteDoubleWord ${IF} 0x0
+    IRQ Should Be               unset
     # Disable main counter tick interrupt
-    Execute Command               sysbus.rtcc WriteDoubleWord ${IEN_REG} 0x0
-    Execute Command               emulation RunFor "0.998"
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${CNT_REG}
-    ${check_val}                  evaluate  ${FREQUENCY} * 1
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    Assert IRQ Is Unset
+    Execute Command             rtcc WriteDoubleWord ${IEN} 0x0
+    Execute Command             emulation RunFor "0.998"
+    Register Should Be          ${CNT}  ${FREQUENCY}
+    IRQ Should Be               unset
 
-Counter Output Compare
-    Create Machine
-    # Prescaler mode, divider set to 1, CNT top value enabled and set)
-    Execute Command               sysbus.rtcc WriteDoubleWord ${CFG_REG} ${CONFIG_CNT_CC1_TOP_VALUE_ENABLE}
+Should Raise Counter Output Compare Interrupt
+    # Prescaler mode, divider set to 1, CNT top value enabled and set
+    Execute Command             rtcc WriteDoubleWord ${CFG} ${CONFIG_CNT_CC1_TOP_VALUE_ENABLE}
     # Configure CC1 in output compare mode and set the output compare value
-    Execute Command               sysbus.rtcc WriteDoubleWord ${CC1_CTRL_REG} 0x02
-    Execute Command               sysbus.rtcc WriteDoubleWord ${CC1_OUTPUT_COMPARE_REG} ${FREQUENCY}
+    Execute Command             rtcc WriteDoubleWord ${CC1_CTRL} 0x02
+    Execute Command             rtcc WriteDoubleWord ${CC1_OUTPUT_COMPARE} ${FREQUENCY}
     # Enable overflow interrupt
-    Execute Command               sysbus.rtcc WriteDoubleWord ${IEN_REG} 0x1
-    # Start the Counter
-    Start Command
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers   ${read_val}  ${STATUS_RUNNING}
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${CNT_REG}
-    Should Be Equal As Integers   ${read_val}  0
-    Execute Command               emulation RunFor "1"
-    Assert IRQ Is Set
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${CNT_REG}
-    Should Be Equal As Integers   ${read_val}  0
-    Execute Command               sysbus.rtcc WriteDoubleWord ${IF_REG} 0x0
-    Assert IRQ Is Unset
+    Execute Command             rtcc WriteDoubleWord ${IEN} 0x1
+    Start Counter
+    Register Should Be          ${CNT}  0
+    Execute Command             emulation RunFor "1"
+    IRQ Should Be               set
+    Register Should Be          ${CNT}  0
+    Execute Command             rtcc WriteDoubleWord ${IF} 0x0
+    IRQ Should Be               unset
     # Disable CNT top value
-    Execute Command               sysbus.rtcc WriteDoubleWord ${CFG_REG} 0
+    Execute Command             rtcc WriteDoubleWord ${CFG} 0
     # Enable CC1 interrupt / disable overflow interrupt
-    Execute Command               sysbus.rtcc WriteDoubleWord ${IEN_REG} 0x40
-    ${compare_val}                evaluate  ${FREQUENCY} * 1
-    Execute Command               sysbus.rtcc WriteDoubleWord ${CC1_OUTPUT_COMPARE_REG} ${compare_val}
-    Execute Command               emulation RunFor "1"
-    Assert IRQ Is Set
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${CNT_REG}
-    Should Be Equal As Integers   ${read_val}  ${compare_val}
-    Execute Command               sysbus.rtcc WriteDoubleWord ${IF_REG} 0x0
-    Assert IRQ Is Unset
-    ${compare_val}                evaluate  ${FREQUENCY} * 2
-    Execute Command               sysbus.rtcc WriteDoubleWord ${CC1_OUTPUT_COMPARE_REG} ${compare_val}
-    Execute Command               emulation RunFor "1"
-    Assert IRQ Is Set
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${CNT_REG}
-    Should Be Equal As Integers   ${read_val}  ${compare_val}
-    Execute Command               sysbus.rtcc WriteDoubleWord ${IF_REG} 0x0
-    Assert IRQ Is Unset
+    Execute Command             rtcc WriteDoubleWord ${IEN} 0x40
+    FOR  ${compare}  IN  ${FREQUENCY}  ${{ ${FREQUENCY} * 2 }}
+        Execute Command         rtcc WriteDoubleWord ${CC1_OUTPUT_COMPARE} ${compare}
+        Execute Command         emulation RunFor "1"
+        IRQ Should Be           set
+        Register Should Be      ${CNT}  ${compare}
+        Execute Command         rtcc WriteDoubleWord ${IF} 0x0
+        IRQ Should Be           unset
+    END
 
-Divider
-    Create Machine
+Should Divide Counter Clock
     # Prescaler mode, divider set to 8
-    Execute Command               sysbus.rtcc WriteDoubleWord ${CFG_REG} 0x30
+    Execute Command             rtcc WriteDoubleWord ${CFG} 0x30
     # Configure CC0 in output compare mode and set the output compare value
-    Execute Command               sysbus.rtcc WriteDoubleWord ${CC0_CTRL_REG} 0x02
-    ${compare_val}                evaluate  ${FREQUENCY} / 8
-    Execute Command               sysbus.rtcc WriteDoubleWord ${CC0_OUTPUT_COMPARE_REG} ${compare_val}
+    Execute Command             rtcc WriteDoubleWord ${CC0_CTRL} 0x02
+    Execute Command             rtcc WriteDoubleWord ${CC0_OUTPUT_COMPARE} ${{ ${FREQUENCY} // 8 }}
     # Enable CC0 interrupts
-    Execute Command               sysbus.rtcc WriteDoubleWord ${IEN_REG} 0x10
-    # Start the Counter
-    Start Command
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers   ${read_val}  ${STATUS_RUNNING}
-    Execute Command               emulation RunFor "0.9"
-    Assert IRQ Is Unset
-    Execute Command               emulation RunFor "0.1"
-    Assert IRQ Is Set
-    ${read_val}=                  Execute Command  sysbus.rtcc ReadDoubleWord ${CNT_REG}
-    Should Be Equal As Integers   ${read_val}  ${compare_val}
-    Execute Command               sysbus.rtcc WriteDoubleWord ${IF_REG} 0x0
-    Assert IRQ Is Unset
+    Execute Command             rtcc WriteDoubleWord ${IEN} 0x10
+    Start Counter
+    Execute Command             emulation RunFor "0.9"
+    IRQ Should Be               unset
+    Execute Command             emulation RunFor "0.1"
+    IRQ Should Be               set
+    Register Should Be          ${CNT}  ${{ ${FREQUENCY} // 8 }}
+    Execute Command             rtcc WriteDoubleWord ${IF} 0x0
+    IRQ Should Be               unset

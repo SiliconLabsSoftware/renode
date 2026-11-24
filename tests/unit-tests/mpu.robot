@@ -2,6 +2,7 @@
 ${MMU_LOG_PREFIX}                   cpu: Using incorrect MMU mode for translation of address${SPACE}
 ${MMU_LOG_SUFFIX}                   , current MMU mode is 1, mapping is for MMU mode 0
 ${NVIC_CFSR}                        0xD28
+${NVIC_MPU_MMFAR}                   0xD34
 ${NVIC_MPU_CTRL}                    0xD94
 ${NVIC_MPU_REG}                     0xD98
 ${NVIC_MPU_RBAR}                    0xD9C
@@ -39,16 +40,24 @@ MMFSR Should Be Equal
     ${MMFSR}=                       Evaluate  (${CFSR.strip()} & 0xFF)
     Should Be Equal As Integers     ${MMFSR}  ${expected_val}
 
+Configure MPU Region
+    [Arguments]                     ${region_number}    ${base_address}     ${WIDTH}    ${AP}
+    ...                             ${XN}=0    ${TEX}=0    ${S}=0    ${C}=0    ${B}=0   ${SRD}=0    ${ENABLE}=1
+
+    ${rbar}=                        Evaluate    ((${base_address} & 0xffffffe0) | (${region_number} & 0xf) | (1<<4))
+    ${rasr}=                        Evaluate    ((${XN} & 1) << 28 | (${AP} & 0x7) << 24 | (${TEX} & 0x7) << 19 | (${S} & 1) << 18 | (${C} & 1) << 17 | (${B} & 1) << 16 | (${SRD} & 0xff) << 8 | (${WIDTH} & 0x1f) << 1 | (${ENABLE} & 1))
+
+    Execute Command                 nvic WriteDoubleWord ${NVIC_MPU_RBAR} ${rbar}
+    Execute Command                 nvic WriteDoubleWord ${NVIC_MPU_RASR} ${rasr}
+
 Machine Setup With PRIVDEFENA Set To
     [Arguments]                     ${PRIVDEFENA}
     Execute Command                 mach create
     Execute Command                 machine LoadPlatformDescription @platforms/boards/stm32f4_discovery-kit.repl
     Execute Command                 nvic WriteDoubleWord ${NVIC_MPU_REG} 0x0
-    Execute Command                 nvic WriteDoubleWord ${NVIC_MPU_RBAR} 0x08000010 # R0: flash 64KB, RW, exec
-    Execute Command                 nvic WriteDoubleWord ${NVIC_MPU_RASR} 0x0302001F
+    Configure MPU Region            0  0x08000000  WIDTH=15  AP=3  C=1
     Execute Command                 nvic WriteDoubleWord ${NVIC_MPU_REG} 0x1
-    Execute Command                 nvic WriteDoubleWord ${NVIC_MPU_RBAR} 0x20000011 # R1: SRAM 0x20000000 2KB (stack), XN
-    Execute Command                 nvic WriteDoubleWord ${NVIC_MPU_RASR} 0x13020015
+    Configure MPU Region            1  0x20000000  WIDTH=10  AP=3  XN=1  C=1
     Execute Command                 nvic WriteDoubleWord ${NVIC_MPU_CTRL} 0x1
     Execute Command                 cpu MPUPrivdefena ${PRIVDEFENA}
 
@@ -80,8 +89,8 @@ Should Warn When Translating Address From Incorrect MMU Mode
     Execute Command                 emulation RunFor "0.1"
 
     # Set USERSETMPEND, this makes a simple sub-page mapping at 0xE00EF00 for 4 bytes
-    ${CCR_VALUE}=  Execute Command  nvic ReadDoubleWord 0xD14
-    ${CCR_VALUE}=  Evaluate         (${CCR_VALUE} | 0b10)
+    ${CCR_VALUE}=                   Execute Command  nvic ReadDoubleWord 0xD14
+    ${CCR_VALUE}=                   Evaluate  (${CCR_VALUE} | 0b10)
     Execute Command                 nvic WriteDoubleWord 0xD14 ${CCR_VALUE}
 
     Create Log Tester               1
@@ -103,6 +112,35 @@ Privileged Access Uses Background Map When PRIVDEFENA Is Set
 Privileged Access Faults Without Region When PRIVDEFENA Is Not Set
     Machine Setup With PRIVDEFENA Set To  False
     Try Access Default Map Addr
-    ${expected_mmfsr}=             Evaluate  (${MMARVALID}|${DACCVIOL})
-    MMFSR Should Be Equal          ${expected_mmfsr}
+    ${expected_mmfsr}=              Evaluate  (${MMARVALID}|${DACCVIOL})
+    MMFSR Should Be Equal           ${expected_mmfsr}
 
+Small Region Inside A Page Covered By A Large Region Should Still Fault
+    Execute Command                 mach create
+    Execute Command                 machine LoadPlatformDescription @platforms/boards/stm32f4_discovery-kit.repl
+    Configure MPU Region            0  0x00000000  WIDTH=31  AP=3
+    Configure MPU Region            1  0x20001020  WIDTH=4  AP=0
+    Execute Command                 nvic WriteDoubleWord ${NVIC_MPU_CTRL} 0x1
+
+    ${pc}=                          Set Variable  0x08000000
+
+    Execute Command                 cpu PC ${pc}
+    Execute Command                 cpu SP 0x20000400
+
+    ${asm}=                         Catenate  SEPARATOR=${\n}
+    ...                             ldr r0, =0x20001000
+    ...                             ldr r1, [r0]
+    ...                             ldr r0, =0x20001020
+    ...                             ldr r1, [r0]
+
+    Store Assembled Code            ${pc}  ${asm}
+
+    Execute Command                 cpu ExecutionMode SingleStep
+    Start Emulation
+    Execute Command                 cpu Step 2
+    MMFSR Should Be Equal           0
+    Execute Command                 cpu Step 2
+    ${expected_mmfsr}=              Evaluate  (${MMARVALID}|${DACCVIOL})
+    MMFSR Should Be Equal           ${expected_mmfsr}
+    ${MMFAR}=                       Execute Command  nvic ReadDoubleWord ${NVIC_MPU_MMFAR}
+    Should Be Equal As Integers     ${MMFAR.strip()}  0x20001020

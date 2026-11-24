@@ -13,7 +13,6 @@
 extern "C" {
 #endif
 
-
 /* Error handling */
 
 /**
@@ -27,11 +26,11 @@ extern "C" {
  */
 typedef enum {
     ERR_INVALID_CODE = -1, /**< Invalid error code */
-    ERR_FATAL, /**< Fatal error */
-    ERR_COMMAND_FAILED, /**< Command failed */
-    ERR_INVALID_COMMAND, /**< Invalid command */
-    ERR_INVALID_ARGUMENT, /**< Function called with invalid argument */
-    ERR_CONNECTION_BUSY, /**< The Renode connection is busy and cannot be closed */
+    ERR_FATAL,             /**< Fatal error */
+    ERR_COMMAND_FAILED,    /**< Command failed */
+    ERR_INVALID_COMMAND,   /**< Invalid command */
+    ERR_INVALID_ARGUMENT,  /**< Function called with invalid argument */
+    ERR_CONNECTION_BUSY,   /**< The Renode connection is busy and cannot be closed */
 } renode_error_code_t;
 
 /**
@@ -48,15 +47,14 @@ typedef struct {
     void *data;
 } renode_error_t;
 
-
 /* General */
 
 /**
  * @brief The API handle for the Renode connection.
  *
  * Renode handles are pointers to structs that are implemented internally, which must be prepared by calling
- * `renode_get_X` functions (renode_connect() or renode_connect_in_process() for `renode_t`) so that they can be later used in their
- * related functions.
+ * `renode_get_X` functions (renode_connect() or renode_connect_in_process() for `renode_t`) so that they can be later used in
+ * their related functions.
  *
  * The internal structs are not a part of the API.
  *
@@ -156,8 +154,13 @@ typedef struct {
  * @brief The function initializing a connection to the Renode instance that runs in this process through librenode.
  *
  * It is defined only when the library is built with `RENODE_API_TRANSPORT=in_process`, which links librenode.
- * Requests to Renode run on the calling thread. Callbacks run on the Renode thread that raises them,
- * and calls that a callback makes run on that thread too.
+ * It starts Renode with an empty emulation, which a script that renode_run_script() runs can then fill.
+ * The emulation stays paused until renode_start() or renode_run_for(). renode_disconnect() ends Renode, so a program
+ * makes only one such connection and must not start Renode with librenode itself.
+ * Requests to Renode run on the calling thread, and several threads may send requests at the same time.
+ * Only one thread at a time may run the emulation with renode_run_for(),
+ * because a second call during a run blocks forever.
+ * Callbacks run on the Renode thread that invokes them, and calls that a callback makes run on that thread too.
  *
  * @note The connection should be closed using renode_disconnect() before the client app exits.
  *
@@ -193,6 +196,19 @@ renode_error_t *renode_disconnect(renode_t **renode);
 renode_error_t *renode_disconnect_ex(renode_t **renode, bool blocking);
 
 /**
+ * @brief The function running a Renode script, such as a `.resc` file, which can create machines.
+ *
+ * The function returns after the script has run. A relative path is looked up in the working directory of Renode
+ * first, then in the Monitor's `path`. Unlike in the Monitor command `include`, the path needs no escaping.
+ * The function runs only Monitor scripts, not Python, C# or platform description files.
+ *
+ * @param[in] renode - the Renode connection handle
+ * @param[in] path - the path of the script
+ * @return A pointer to the error structure if an error occurred, otherwise NULL.
+ */
+renode_error_t *renode_run_script(renode_t *renode, const char *path);
+
+/**
  * @brief The function preparing the machine handle.
  *
  * @note The handle's internal memory is dynamically allocated, so `*machine` should be freed when it's no longer used.
@@ -225,17 +241,16 @@ void renode_free_error(renode_error_t *error);
  */
 void renode_set_fatal_error_callback(renode_t *renode, void *user_data, renode_fatal_error_callback_t callback);
 
-
 /* Time control */
 
 /**
  * The supported time units.
  */
 typedef enum {
-    TU_NANOSECONDS  =          1, /**< Nanoseconds */
-    TU_MICROSECONDS =       1000, /**< Microseconds */
-    TU_MILLISECONDS =    1000000, /**< Milliseconds */
-    TU_SECONDS      = 1000000000, /**< Seconds */
+    TU_NANOSECONDS = 1,        /**< Nanoseconds */
+    TU_MICROSECONDS = 1000,    /**< Microseconds */
+    TU_MILLISECONDS = 1000000, /**< Milliseconds */
+    TU_SECONDS = 1000000000,   /**< Seconds */
 } renode_time_unit_t;
 
 /**
@@ -266,7 +281,8 @@ renode_error_t *renode_create_time(uint64_t value, renode_time_unit_t unit, reno
  * @note The function floors the result of the conversion.
  *
  * @param[in] time - the Renode time instance
- * @param[in] unit - the unit in which the given time is expressed (see renode_time_unit_t); the caller is responsible for ensuring that the passed unit is valid
+ * @param[in] unit - the unit in which the given time is expressed (see renode_time_unit_t); the caller is responsible for
+ * ensuring that the passed unit is valid
  * @return A time value in a given unit.
  */
 uint64_t renode_time_to_time_unit(renode_time_t time, renode_time_unit_t unit);
@@ -278,7 +294,7 @@ uint64_t renode_time_to_time_unit(renode_time_t time, renode_time_unit_t unit);
  * @return A floating-point timestamp equivalent in seconds.
  * @note The result is precise down to one nanosecond.
  * Decimal places smaller than 10E-9 are conversion arifacts.
- * The result keeps the nanosecond-precison up to around 93 days of virtual time - 
+ * The result keeps the nanosecond-precison up to around 93 days of virtual time -
  * for higher values, precision gradually degradates.
  */
 double renode_time_to_seconds(renode_time_t time);
@@ -286,11 +302,50 @@ double renode_time_to_seconds(renode_time_t time);
 /**
  * @brief The function specifying that the emulation should run for a given amount of time.
  *
+ * @note The run ends at a synchronization point, so when the function returns, every callback invoked for a change
+ * during the run, such as a GPIO state change made by a CPU, has finished. A change made at that synchronization point
+ * itself, such as a peripheral passing on an input that took effect there, invokes its callbacks at the next
+ * synchronization point, during the next run.
+ *
  * @param[in] renode - the Renode connection handle
  * @param[in] time - the duration of virtual time that the emulation should execute for
  * @return A pointer to the error structure if an error occurred, otherwise NULL.
  */
 renode_error_t *renode_run_for(renode_t *renode, renode_time_t time);
+
+/**
+ * @brief The function starting the emulation, which then runs freely until renode_pause().
+ *
+ * It does nothing if the emulation already runs. While the emulation runs freely, renode_run_for() fails.
+ * It is equivalent to the Monitor command `start`.
+ *
+ * @param[in] renode - the Renode connection handle
+ * @return A pointer to the error structure if an error occurred, otherwise NULL.
+ */
+renode_error_t *renode_start(renode_t *renode);
+
+/**
+ * @brief The function pausing the emulation that renode_start() started.
+ *
+ * The emulation is paused when the function returns. It is equivalent to the Monitor command `pause`.
+ *
+ * @param[in] renode - the Renode connection handle
+ * @return A pointer to the error structure if an error occurred, otherwise NULL.
+ */
+renode_error_t *renode_pause(renode_t *renode);
+
+/**
+ * @brief The function setting the quantum, which is the virtual time between the synchronization points of the emulation.
+ *
+ * A smaller quantum keeps the CPUs and machines of the emulation closer in virtual time, and a larger one lets the
+ * emulation run faster. renode_run_for() ends at a synchronization point whatever the quantum is.
+ * It is equivalent to the Monitor command `emulation SetGlobalQuantum`.
+ *
+ * @param[in] renode - the Renode connection handle
+ * @param[in] quantum - the new quantum
+ * @return A pointer to the error structure if an error occurred, otherwise NULL.
+ */
+renode_error_t *renode_set_quantum(renode_t *renode, renode_time_t quantum);
 
 /**
  * @brief The function fetching the current virtual time of the emulation.
@@ -329,7 +384,6 @@ renode_error_t *renode_register_time_elapsed_callback(renode_t *renode, void *us
  */
 renode_error_t *renode_get_adc(renode_machine_t *machine, const char *name, renode_adc_t **adc);
 
-
 /**
  * @brief The function fetching the number of channels of the ADC.
  *
@@ -351,6 +405,9 @@ renode_error_t *renode_get_adc_channel_value(renode_adc_t *adc, int32_t channel,
 
 /**
  * @brief The function setting an ADC channel's value.
+ *
+ * @note The new value takes effect before the function returns. An ADC conversion during the call reads either the
+ * old value or the new value.
  *
  * @param[in] adc - the ADC handle
  * @param[in] channel - the ADC channel index
@@ -386,6 +443,9 @@ renode_error_t *renode_get_gpio_state(renode_gpio_t *gpio, int32_t id, bool *sta
 /**
  * @brief The function setting the GPIO state.
  *
+ * @note While the emulation runs, the input changes at the next synchronization point, so a read of the receiving
+ * peripheral right after the call can still return the old input.
+ *
  * @param[in] gpio - the GPIO controller handle
  * @param[in] id - the GPIO's index in the given GPIO controller
  * @param[in] state - the requested GPIO state
@@ -406,18 +466,24 @@ typedef struct __attribute__((packed)) {
 /**
  * @brief The function registering the callback when the GPIO state changes.
  *
+ * The callback runs at the next synchronization point after the change, not during the CPU access or the request
+ * that changed the state. While the emulation is paused, the callback doesn't run until the emulation runs again. In
+ * the SynchronizedTimers emulation mode, the callback runs during the change instead, even while the emulation is
+ * paused.
+ *
  * @param[in] gpio - the GPIO controller handle
  * @param[in] id - the GPIO's index in the given GPIO controller
  * @param[in] user_data - the pointer to the data passed to the callback when invoked
  * @param[in] callback - the callback to be invoked when the GPIO state with the given index changes
  * @return A pointer to the error structure if an error occurred, otherwise NULL.
  */
-renode_error_t *renode_register_gpio_state_change_callback(renode_gpio_t *gpio, int32_t id, void *user_data, void (*callback)(void *, renode_gpio_event_data_t *));
+renode_error_t *renode_register_gpio_state_change_callback(renode_gpio_t *gpio, int32_t id, void *user_data,
+                                                           void (*callback)(void *, renode_gpio_event_data_t *));
 
 /**
  * The custom command event data.
  */
- typedef struct {
+typedef struct {
     /** The virtual time at which the event occurred */
     renode_time_t time;
     /** The command string */
@@ -434,19 +500,20 @@ typedef struct {
     char response_string[];
 } renode_custom_command_response_data_t;
 
-typedef renode_custom_command_response_data_t * (*renode_custom_command_callback_t)(void *ud, renode_custom_command_event_data_t *event_data);
+typedef renode_custom_command_response_data_t *(*renode_custom_command_callback_t)(
+    void *ud, renode_custom_command_event_data_t *event_data);
 
 /**
- * @brief The function registering callback on custom command. The callback function returns a pointer to the `renode_custom_command_callback_t` struct which it allocates.
- *  This pointer is freed in the `invoke_callback` function.
+ * @brief The function registering callback on custom command. The callback function returns a pointer to the
+ * `renode_custom_command_callback_t` struct which it allocates. This pointer is freed in the `invoke_callback` function.
  *
  * @param[in] renode - the Renode handle
  * @param[in] user_data - the pointer to the data passed to the callback when invoked
  * @param[in] callback - the callback to be invoked when a custom command is issued
  * @return A pointer to the error structure if an error occurred, otherwise NULL.
  */
-renode_error_t *renode_register_custom_command_callback(renode_t *renode, void *user_data, renode_custom_command_callback_t callback);
-
+renode_error_t *renode_register_custom_command_callback(renode_t *renode, void *user_data,
+                                                        renode_custom_command_callback_t callback);
 
 /* CAN */
 /**
@@ -495,6 +562,10 @@ renode_error_t *renode_register_can_callback(renode_can_t *can, void *user_data,
 /**
  * @brief The function sending a CAN message.
  *
+ * @note The other controllers on the CAN bus get the frame either:
+ * (1) at the next synchronization point, in the default SynchronizedIO emulation mode, or
+ * (2) before the function returns, in the SynchronizedTimers emulation mode.
+ *
  * @param[in] can - the CAN instance handle
  * @param[in] packet - the pointer to the CAN packet payload
  * @param[in] packet_length - the length of the packet to be sent
@@ -502,7 +573,6 @@ renode_error_t *renode_register_can_callback(renode_can_t *can, void *user_data,
  * @return A pointer to the error structure if an error occurred, otherwise NULL.
  */
 renode_error_t *renode_send_can_message(renode_can_t *can, void *packet, int packet_length, uint32_t packet_id);
- 
 
 /* System bus */
 
@@ -510,14 +580,14 @@ renode_error_t *renode_send_can_message(renode_can_t *can, void *packet, int pac
  * The supported access width options.
  */
 typedef enum {
-    AW_BYTE        = 1, /**< Byte access */
-    AW_WORD        = 2, /**< Word (2B) access */
-    AW_DOUBLE_WORD = 4, /**< Double word (4B) access */
-    AW_QUAD_WORD   = 8, /**< Quad word (8B) access */
-    AW_MULTI_BYTE  = 128, /**< Multibyte access (number of bytes defined by `count`) */
+    AW_BYTE = 1,         /**< Byte access */
+    AW_WORD = 2,         /**< Word (2B) access */
+    AW_DOUBLE_WORD = 4,  /**< Double word (4B) access */
+    AW_QUAD_WORD = 8,    /**< Quad word (8B) access */
+    AW_MULTI_BYTE = 128, /**< Multibyte access (number of bytes defined by `count`) */
 
     /** Any access width for the purpose of callback filtering */
-    AW_CB_ANY      = (AW_BYTE | AW_WORD | AW_DOUBLE_WORD | AW_QUAD_WORD | AW_MULTI_BYTE),
+    AW_CB_ANY = (AW_BYTE | AW_WORD | AW_DOUBLE_WORD | AW_QUAD_WORD | AW_MULTI_BYTE),
 } renode_access_width_t;
 
 /**
@@ -525,11 +595,11 @@ typedef enum {
  */
 typedef enum {
     /** Read on the bus */
-    SYSBUS_CB_READ  = (1 << 0),
+    SYSBUS_CB_READ = (1 << 0),
     /** Write on the bus */
     SYSBUS_CB_WRITE = (1 << 1),
     /** Any access type for the purpose of callback filtering */
-    SYSBUS_CB_BOTH  = (SYSBUS_CB_WRITE | SYSBUS_CB_READ),
+    SYSBUS_CB_BOTH = (SYSBUS_CB_WRITE | SYSBUS_CB_READ),
 } renode_access_type_t;
 
 /**
@@ -594,10 +664,14 @@ renode_error_t *renode_get_byte_count(renode_access_width_t width, uint32_t coun
  * @param[in] count - the number of requested reads (total data size will be `width * count`)
  * @return A pointer to the error structure if an error occurred, otherwise NULL.
  */
-renode_error_t *renode_sysbus_read(renode_bus_context_t *ctx, uint64_t address, renode_access_width_t width, void *buffer, uint32_t count);
+renode_error_t *renode_sysbus_read(renode_bus_context_t *ctx, uint64_t address, renode_access_width_t width, void *buffer,
+                                   uint32_t count);
 
 /**
  * @brief The function writing data to the system bus.
+ *
+ * @note The write takes effect before the function returns, so a later renode_sysbus_read() from any thread of this
+ * client sees the result.
  *
  * @param[in] ctx - the bus handle
  * @param[in] address - the absolute address of the access
@@ -606,7 +680,8 @@ renode_error_t *renode_sysbus_read(renode_bus_context_t *ctx, uint64_t address, 
  * @param[in] count - the number of requested writes (total data size is `width * count`)
  * @return A pointer to the error structure if an error occurred, otherwise NULL.
  */
-renode_error_t *renode_sysbus_write(renode_bus_context_t *ctx, uint64_t address, renode_access_width_t width, const void *buffer, uint32_t count);
+renode_error_t *renode_sysbus_write(renode_bus_context_t *ctx, uint64_t address, renode_access_width_t width, const void *buffer,
+                                    uint32_t count);
 
 /**
  * @brief The structure storing information about an access event to Renode's system bus.
@@ -658,11 +733,12 @@ renode_error_t *renode_get_bus_peripheral(renode_machine_t *machine, const char 
  *
  * All callbacks should set renode_sysbus_event_data_t::access_succeeded to true.
  * By default, it is false.
- * If renode_sysbus_event_data_t::access_type is ::SYSBUS_CB_READ, then the callback should set renode_sysbus_event_data_t::data to true.
- * By default, it is all zeros, and can be omitted if the access doesn't succeed.
+ * If renode_sysbus_event_data_t::access_type is ::SYSBUS_CB_READ, then the callback should set renode_sysbus_event_data_t::data
+ * to true. By default, it is all zeros, and can be omitted if the access doesn't succeed.
  */
-renode_error_t *renode_register_sysbus_access_callback(renode_bus_peripheral_t *bus_peripheral, renode_access_type_t access_type, renode_access_width_t width, void *user_data, renode_sysbus_event_callback_t callback);
-
+renode_error_t *renode_register_sysbus_access_callback(renode_bus_peripheral_t *bus_peripheral, renode_access_type_t access_type,
+                                                       renode_access_width_t width, void *user_data,
+                                                       renode_sysbus_event_callback_t callback);
 
 /* SPI */
 
@@ -710,8 +786,8 @@ typedef void (*renode_spi_finish_callback_t)(void *user_data);
  * @param[in] on_finish - the callback invoked when the transfer finishes (may be NULL)
  * @return A pointer to the error structure if an error occurred, otherwise NULL.
  */
-renode_error_t *renode_spi_register_callbacks(renode_spi_t *spi, void *user_data,
-    renode_spi_transmit_callback_t on_transmit, renode_spi_finish_callback_t on_finish);
+renode_error_t *renode_spi_register_callbacks(renode_spi_t *spi, void *user_data, renode_spi_transmit_callback_t on_transmit,
+                                              renode_spi_finish_callback_t on_finish);
 
 #ifdef __cplusplus
 }

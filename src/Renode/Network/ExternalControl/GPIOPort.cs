@@ -7,6 +7,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 
 using Antmicro.Renode.Core;
@@ -59,7 +60,7 @@ namespace Antmicro.Renode.Network.ExternalControl
 
                 if(instance is IGPIOReceiver receiver)
                 {
-                    receiver.OnGPIO(id, value);
+                    SetInput(receiver, id, value);
                     return MessagePayload.Success(Identifier);
                 }
                 return MessagePayload.Error(Identifier, "This instance does not provide GPIO inputs");
@@ -77,7 +78,7 @@ namespace Antmicro.Renode.Network.ExternalControl
                     return MessagePayload.Error(Identifier, $"This instance does not provide GPIO output #{id}");
                 }
 
-                (pin as GPIO).AddStateChangedHook((state) => SendEvent(state, ed));
+                (pin as GPIO).AddStateChangedHook((state) => QueueEvent(state, ed));
                 return MessagePayload.Success(Identifier);
 
             default:
@@ -123,6 +124,86 @@ namespace Antmicro.Renode.Network.ExternalControl
             return instance is INumberedGPIOOutput || instance is IGPIOReceiver;
         }
 
+        // While CPUs run, an input waits for the nearest synced state of the receiver's machine,
+        // so that it can't race with a guest access to the receiver.
+        // Every input goes through the machine's queue, so that inputs from several client threads
+        // take effect one at a time and in the order of the calls.
+        private void SetInput(IGPIOReceiver receiver, int id, bool value)
+        {
+            var machine = receiver.GetMachine();
+            var input = new QueuedInput(receiver, id, value);
+
+            var isOnSyncPhaseThread = machine.LocalTimeSource.IsOnSyncPhaseThread
+                || EmulationManager.Instance.CurrentEmulation.MasterTimeSource.IsOnSyncPhaseThread;
+            var cpusRun = !machine.IsPaused && !isOnSyncPhaseThread;
+
+            lock(queuedInputs)
+            {
+                if(queuedInputs.TryGetValue(machine, out var queue))
+                {
+                    queue.Enqueue(input);
+                    return;
+                }
+
+                queuedInputs[machine] = new Queue<QueuedInput>(new[] { input });
+            }
+
+            // Only the thread that created the queue gets here, because other threads found that queue and
+            // returned above. So each queue gets one ApplyQueuedInputs, which also applies every input that
+            // joins the queue later.
+            if(cpusRun)
+            {
+                machine.LocalTimeSource.ExecuteInNearestSyncedState(_ => ApplyQueuedInputs(machine));
+            }
+            else
+            {
+                ApplyQueuedInputs(machine);
+            }
+        }
+
+        private void ApplyQueuedInputs(IMachine machine)
+        {
+            var failures = new List<Exception>();
+            while(TryDequeueInput(machine, out var input))
+            {
+                try
+                {
+                    input.Receiver.OnGPIO(input.Id, input.Value);
+                }
+                catch(Exception e)
+                {
+                    // The queue must be emptied even when an input fails. Other threads only add to a queue
+                    // that exists, so no other thread would ever empty it, and its inputs would be lost.
+                    failures.Add(e);
+                }
+            }
+
+            if(failures is [var failure])
+            {
+                ExceptionDispatchInfo.Throw(failure);
+            }
+            else if(failures is [_, _, ..])
+            {
+                throw new AggregateException(failures);
+            }
+        }
+
+        private bool TryDequeueInput(IMachine machine, out QueuedInput input)
+        {
+            lock(queuedInputs)
+            {
+                if(queuedInputs[machine].TryDequeue(out input))
+                {
+                    return true;
+                }
+
+                // The empty queue stays until the last input's OnGPIO has returned, so that inputs set meanwhile
+                // join it instead of starting another ApplyQueuedInputs.
+                queuedInputs.Remove(machine);
+                return false;
+            }
+        }
+
         private MessagePayload HandleEventRequest(byte[] data)
         {
             EventData eventData;
@@ -152,17 +233,40 @@ namespace Antmicro.Renode.Network.ExternalControl
             return MessagePayload.Success(Identifier);
         }
 
-        private void SendEvent(bool gpioState, int eventDescriptor)
+        private void QueueEvent(bool gpioState, int eventDescriptor)
         {
+            var emulation = EmulationManager.Instance.CurrentEmulation;
             var data = new EventData()
             {
                 CallbackIdentifier = eventDescriptor,
-                TimestampNanoseconds = EmulationManager.Instance.CurrentEmulation.MasterTimeSource.ElapsedVirtualTime.TotalNanoseconds,
+                TimestampNanoseconds = emulation.MasterTimeSource.ElapsedVirtualTime.TotalNanoseconds,
                 GpioState = gpioState,
             };
 
-            var response = parent.SendRequest(MessagePayload.FromStruct(Identifier, CommandType.EventRequest, data));
-            response.LogOnError(Identifier, parent.Owner);
+            // GPIOConnector also passes changes at once in this mode, even while the emulation is paused.
+            if(emulation.Mode == Emulation.EmulationMode.SynchronizedTimers)
+            {
+                SendEvent(data);
+                return;
+            }
+
+            // An event sent at once would be a request nested in the call that changed the state,
+            // such as a guest access that keeps the peripheral locked or a request from the client.
+            emulation.MasterTimeSource.ExecuteInNearestSyncedState(_ => SendEvent(data));
+        }
+
+        private void SendEvent(EventData data)
+        {
+            // The client can disconnect while the event waits for the nearest synced state.
+            try
+            {
+                var response = parent.SendRequest(MessagePayload.FromStruct(Identifier, CommandType.EventRequest, data));
+                response.LogOnError(Identifier, parent.Owner);
+            }
+            catch(ConnectionDisposedException)
+            {
+                parent.Owner.DebugLog("{0} command dropped a state change event, because the client disconnected", Identifier);
+            }
         }
 
         private int GetExpectedPayloadCount(GPIOPortCommand command)
@@ -199,6 +303,8 @@ namespace Antmicro.Renode.Network.ExternalControl
 
         private readonly List<Action<TimeStamp, bool>> externalCallbacks = new();
 
+        private readonly Dictionary<IMachine, Queue<QueuedInput>> queuedInputs = new();
+
         private const int InstanceBasedCommandHeaderSize = IInstanceBasedCommandExtensions.HeaderSize;
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -209,6 +315,8 @@ namespace Antmicro.Renode.Network.ExternalControl
             [MarshalAs(UnmanagedType.I1)] // Make the field a single byte
             public bool GpioState;
         }
+
+        private readonly record struct QueuedInput(IGPIOReceiver Receiver, int Id, bool Value);
 
         private enum GPIOPortCommand : byte
         {

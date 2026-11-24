@@ -1,19 +1,19 @@
 #pragma once
 
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <future>
 #include <memory>
-#include <string>
 #include <utility>
 
-#include "librenode.h"
 #include "renode_api.h"
 
-//  Parts shared by the hosts of tests/native-interface/bus-handlers.robot. Each host is one device
-//  model that serves the guest's accesses to sysbus.dut through the external control API.
+//  Parts shared by the native hosts of the tests in tests/native-interface. Most hosts are one
+//  device model that serves the guest's accesses to sysbus.dut through the external control API.
 namespace native_host {
 
 //  The guest ends each test by writing its result to this register of the device.
@@ -27,6 +27,7 @@ enum exit_code {
     exit_pass = 0,
     exit_mismatch = 1,
     exit_setup_error = 2,
+    exit_runtime_error = 3,
 };
 
 inline uint64_t load_little_endian(const uint8_t *data, uint32_t size)
@@ -47,16 +48,6 @@ inline void store_little_endian(uint8_t *data, uint32_t size, uint64_t value)
     }
 }
 
-inline bool execute_command(const std::string &command)
-{
-    const RenodeStatus status = renode_exec_command(command.c_str());
-    if(status != RENODE_SUCCESS) {
-        std::fprintf(stderr, "'%s' failed with status %d\n", command.c_str(), status);
-        return false;
-    }
-    return true;
-}
-
 inline bool check(const char *operation, renode_error_t *error)
 {
     if(error == NO_ERROR) {
@@ -68,16 +59,18 @@ inline bool check(const char *operation, renode_error_t *error)
 }
 
 struct free_handle {
-    void operator()(void *handle) const { std::free(handle); }
+    void operator()(void *handle) const
+    {
+        std::free(handle);
+    }
 };
 
 //  A handle that the external control library allocates with malloc.
-template<typename T>
-using handle = std::unique_ptr<T, free_handle>;
+template <typename T> using handle = std::unique_ptr<T, free_handle>;
 
 //  Calls an external control function that returns a new handle through its last parameter. The
 //  handle is empty on failure.
-template<typename T, typename Function, typename... Arguments>
+template <typename T, typename Function, typename... Arguments>
 handle<T> get_handle(const char *operation, Function function, Arguments... arguments)
 {
     T *result = nullptr;
@@ -105,34 +98,43 @@ public:
     external_control(const external_control &) = delete;
     external_control &operator=(const external_control &) = delete;
 
-    //  Connects to Renode and serves the guest's accesses to the named bus peripheral of the named
-    //  machine with the given handlers, which run on the Renode thread that makes the access.
-    bool connect(const char *machine_name, const char *peripheral_name, read_handler on_read,
-                 write_handler on_write)
+    //  Starts Renode in this process, connects to it, runs the script, which creates the machines, and gets the
+    //  named machine.
+    bool connect(const char *script_path, const char *machine_name)
     {
-        serve_read = std::move(on_read);
-        serve_write = std::move(on_write);
-
         renode_in_process_options_t options = {};
         options.serialize_requests = true;
         if(!check("connect to Renode", renode_connect_in_process(connection_name, &options, &renode))) {
             return false;
         }
-
-        machine = get_handle<renode_machine_t>("get the machine", renode_get_machine, renode, machine_name);
-        if(!machine) {
+        if(!check("run the script", renode_run_script(renode, script_path))) {
             return false;
         }
 
-        proxy = get_handle<renode_bus_peripheral_t>("get the proxy", renode_get_bus_peripheral,
-                                                    machine.get(), peripheral_name);
+        machine = get_handle<renode_machine_t>("get the machine", renode_get_machine, renode, machine_name);
+        return machine != nullptr;
+    }
+
+    //  Connects to Renode and serves the guest's accesses to the named bus peripheral of the named
+    //  machine with the given handlers. Each access is served on a thread of its own, the way
+    //  another simulator runs its device models on threads of its own, while the Renode thread that
+    //  makes the access waits for it.
+    bool connect(const char *script_path, const char *machine_name, const char *peripheral_name, read_handler on_read,
+                 write_handler on_write)
+    {
+        serve_read = std::move(on_read);
+        serve_write = std::move(on_write);
+        if(!connect(script_path, machine_name)) {
+            return false;
+        }
+
+        proxy = get_handle<renode_bus_peripheral_t>("get the proxy", renode_get_bus_peripheral, machine.get(), peripheral_name);
         if(!proxy) {
             return false;
         }
 
         return check("register the access callback",
-                     renode_register_sysbus_access_callback(proxy.get(), SYSBUS_CB_BOTH, AW_CB_ANY,
-                                                            this, serve_access));
+                     renode_register_sysbus_access_callback(proxy.get(), SYSBUS_CB_BOTH, AW_CB_ANY, this, serve_access));
     }
 
     handle<renode_gpio_t> get_gpio(const char *name)
@@ -140,6 +142,38 @@ public:
         return get_handle<renode_gpio_t>("get the GPIO", renode_get_gpio, machine.get(), name);
     }
 
+    handle<renode_bus_context_t> get_sysbus()
+    {
+        return get_handle<renode_bus_context_t>("get the system bus", renode_get_sysbus, machine.get());
+    }
+
+    //  Starts the emulation, which then runs freely until the host quits.
+    bool start()
+    {
+        return check("start the emulation", renode_start(renode));
+    }
+
+    //  Sets the virtual time between the synchronization points of the emulation.
+    bool set_quantum(std::chrono::nanoseconds quantum)
+    {
+        renode_time_t time;
+        if(!check("create the quantum", renode_create_time(quantum.count(), TU_NANOSECONDS, &time))) {
+            return false;
+        }
+        return check("set the quantum", renode_set_quantum(renode, time));
+    }
+
+    //  Runs the emulation for `milliseconds` of virtual time and returns when the time has passed.
+    bool run_for(uint64_t milliseconds)
+    {
+        renode_time_t time;
+        if(!check("create the run time", renode_create_time(milliseconds, TU_MILLISECONDS, &time))) {
+            return false;
+        }
+        return check("run the emulation", renode_run_for(renode, time));
+    }
+
+    //  Disconnects from Renode, which ends it.
     void disconnect()
     {
         if(renode != nullptr) {
@@ -153,11 +187,15 @@ private:
     static void serve_access(void *user_data, renode_sysbus_event_data_t *event)
     {
         auto &control = *static_cast<external_control *>(user_data);
-        if(event->access_type == SYSBUS_CB_READ) {
-            event->access_succeeded = control.serve_read(event->address, event->data, event->byte_count);
-        } else {
-            event->access_succeeded = control.serve_write(event->address, event->data, event->byte_count);
-        }
+
+        const auto serve = [&control, event] {
+            if(event->access_type == SYSBUS_CB_READ) {
+                return control.serve_read(event->address, event->data, event->byte_count);
+            }
+            return control.serve_write(event->address, event->data, event->byte_count);
+        };
+
+        event->access_succeeded = std::async(std::launch::async, serve).get();
     }
 
     renode_t *renode = nullptr;
@@ -167,27 +205,14 @@ private:
     write_handler serve_write;
 };
 
-//  Starts Renode in this process and loads the script named on the command line. The host then
-//  connects and starts the emulation after any further setup.
-inline bool load(int argc, char *argv[])
+//  Checks that the command line names the script, which the host passes to `external_control::connect`.
+inline bool check_usage(int argc, char *argv[])
 {
     if(argc != 2) {
         std::fprintf(stderr, "usage: %s <script.resc>\n", argv[0]);
         return false;
     }
-
-    if(renode_init(nullptr, -1, -1) != RENODE_SUCCESS) {
-        std::fprintf(stderr, "failed to start Renode\n");
-        return false;
-    }
-
-    return execute_command(std::string("include @") + argv[1]);
+    return true;
 }
 
-inline void quit(external_control &control)
-{
-    control.disconnect();
-    renode_exec_command("quit");
-}
-
-} // namespace native_host
+}  //  namespace native_host

@@ -1,11 +1,10 @@
-import test_lib
+import renode_monitor as test_lib
 from typing import List, Optional, Sequence, Tuple
 
 ################################################
 # Globals
 ################################################
 
-DEBUG = True
 FLASH_SIZE = 0x400000
 FLASH_PAGE_SIZE = 0x1000
 FLASH_REGION_SIZE = 0x8000
@@ -93,6 +92,11 @@ SE_COMMAND_ID_FLASH_ERASE_DATA_REGION = 0xFF62
 SE_COMMAND_ID_FLASH_WRITE_DATA_REGION = 0xFF63
 SE_COMMAND_ID_FLASH_GET_DATA_REGION_LOCATION = 0xFF64
 
+# ReadDeviceData (0x4330) options ("Option 1", low byte of the command options word).
+SE_READ_DEVICE_DATA_WHOLE_ELEMENT = 0x00
+SE_READ_DEVICE_DATA_CHUNK = 0x01
+SE_READ_DEVICE_DATA_GET_SIZE = 0x03
+
 # User Data Storage (0x43FD) options ("Option 1", low byte of the command options word) and token size.
 SE_USER_DATA_OPTION_GET = 0x00
 SE_USER_DATA_OPTION_SET = 0x01
@@ -132,7 +136,7 @@ SE_WRAPPED_KEY_TAG_LENGTH = 16
 SE_WRAPPED_KEY_IV_MARKER = 0xAE
 SE_WRAPPED_KEY_TAG_MARKER = 0xBE
 
-SE_AES_CRYPTO_MODE_EBC = 1
+SE_AES_CRYPTO_MODE_ECB = 1
 SE_AES_CRYPTO_MODE_CBC = 2
 SE_AES_CRYPTO_MODE_CTR = 3
 SE_AES_CRYPTO_MODE_CFB = 4
@@ -1174,22 +1178,11 @@ def hex_to_byte_list(hex_digits: str) -> List[int]:
 
 def assert_ciphertext_matches(ciphertext_data_ptr: int, expected_ciphertext: str) -> None:
     expected_ciphertext_bytes = hex_to_byte_list(expected_ciphertext)
-    actual_ciphertext_bytes = []
-    for i in range(len(expected_ciphertext_bytes)):
-        actual_ciphertext_bytes.append(test_lib.read_byte(ciphertext_data_ptr + i))
+    actual_ciphertext_bytes = test_lib.read_bytes(ciphertext_data_ptr, len(expected_ciphertext_bytes))
     test_lib.test_assert(actual_ciphertext_bytes == expected_ciphertext_bytes, f"Ciphertext does not match expected: {actual_ciphertext_bytes} != {expected_ciphertext_bytes}")
 
 def read_semailbox_register(offset) -> int:
     return test_lib.read_register("semailbox", offset)
-
-def write_semailbox_register(offset, value) -> None:
-    test_lib.write_register("semailbox", offset, value)
-
-def read_ksu_register(offset) -> int:
-    return test_lib.read_register("ksu", offset)
-
-def write_ksu_register(offset, value) -> None:
-    test_lib.write_register("ksu", offset, value)
 
 def pack_dma_descriptor(is_last: bool, data_size: int, data: Sequence[int] = None, transfer_options: int = 0) -> Tuple[int, int]:
     """
@@ -1211,18 +1204,15 @@ def pack_dma_descriptor(is_last: bool, data_size: int, data: Sequence[int] = Non
     else:
         next_descriptor_pointer = get_segment(False)
     word2 = (transfer_options << 28) | data_size
-    test_lib.write_doubleword(descriptor_address, data_pointer)
-    test_lib.write_doubleword(descriptor_address + 4, next_descriptor_pointer)
-    test_lib.write_doubleword(descriptor_address + 8, word2)
+    test_lib.write_doublewords(descriptor_address, [data_pointer, next_descriptor_pointer, word2])
     if data is not None:
         assert len(data) == data_size, "data length must match data_size"
-        for i in range(data_size):
-            test_lib.write_byte(data_pointer + i, data[i])
+        test_lib.write_bytes(data_pointer, list(data))
     return descriptor_address, data_pointer
 
 def push_command(command_id: int, command_options: int, parameters: Sequence[int] = (), input_dma_descriptor_ptr: int = 0, output_dma_descriptor_ptr: int = 0) -> Tuple[int, Sequence[int]]:
     """
-    Build (tx_header, fifo_payload_words) for the emulated SEMAILBOX / SecureElement mailbox protocol.
+    Build the TX header and FIFO payload words for the emulated SEMAILBOX / SecureElement mailbox protocol and write them to the SEMAILBOX.
 
     Matches SiLabs_SecureElement.ProcessCommand(): after the TX header word, series3 expects
     command_handle, command_options (command id in upper 16 bits), input DMA root, output DMA root,
@@ -1241,9 +1231,7 @@ def push_command(command_id: int, command_options: int, parameters: Sequence[int
     payload = [SE_DEFAULT_COMMAND_HANDLE, command_options, input_dma_descriptor_ptr, output_dma_descriptor_ptr, *parameters]
     total_words = 1 + len(payload)
     tx_header = total_words * 4
-    write_semailbox_register(SEMAILBOX_REG_TX_HEADER, tx_header)
-    for word in payload:
-        write_semailbox_register(SEMAILBOX_REG_FIFO0, word)
+    test_lib.write_register_words("semailbox", [(SEMAILBOX_REG_TX_HEADER, tx_header), *((SEMAILBOX_REG_FIFO0, word) for word in payload)])
 
 def read_response(assert_success_status: bool = True):
     """
@@ -1287,7 +1275,7 @@ def push_random_command(random_length: int):
 
 def push_aes_encrypt_decrypt_command(is_encrypt: bool, crypto_mode: int, context_mode: int, auth_data: Optional[str], key: str, iv_or_context: Optional[str], input_data: str, include_auth_descriptor: bool = True) -> int:
     """
-    Build an AES encrypt or decrypt mailbox transaction (CommandId.AES_ENCRYPT / AES_DECRYPT)
+    Build an AES encrypt or decrypt mailbox transaction (CommandId.AesEncrypt / AesDecrypt)
     and push it to the SEMAILBOX.
 
     Parameters:
@@ -1314,10 +1302,10 @@ def push_aes_encrypt_decrypt_command(is_encrypt: bool, crypto_mode: int, context
                      first descriptor (key-first / InputKey_t layout for unprotected keys).
 
     Returns the scratch-RAM address of the output data segment (ciphertext for encrypt,
-    plaintext for decrypt). Read it back with test_lib.read_byte() to validate results.
+    plaintext for decrypt). Read it back with test_lib.read_bytes() to validate results.
     """
 
-    is_ecb = (crypto_mode == SE_AES_CRYPTO_MODE_EBC)
+    is_ecb = (crypto_mode == SE_AES_CRYPTO_MODE_ECB)
     needs_output_context = (not is_ecb) and (context_mode in (SE_AES_ENCRYPT_DECRYPT_CONTEXT_MODE_START, SE_AES_ENCRYPT_DECRYPT_CONTEXT_MODE_MIDDLE))
 
     if auth_data is not None:
@@ -1354,7 +1342,7 @@ def push_aes_encrypt_decrypt_command(is_encrypt: bool, crypto_mode: int, context
         command_id = SE_COMMAND_ID_AES_ENCRYPT
     else:
         command_id = SE_COMMAND_ID_AES_DECRYPT
-    
+
     command_options = (crypto_mode << 8) | context_mode
     key_metadata = create_key_metadata(0, SE_KEY_TYPE_RAW, SE_KEY_MODE_UNPROTECTED, SE_KEY_RESTRICTION_UNLOCKED, len(key_bytes))
     push_command(command_id, command_options, (key_metadata, len(input_bytes)), input_root, output_root)
@@ -1382,17 +1370,17 @@ def push_aes_ccm_encrypt_command(key: str, nonce: str, aad: Optional[str], input
       key:        Even-length hex string for the raw key bytes (16 / 24 / 32 bytes for
                   AES-128 / 192 / 256 respectively).
       nonce:      Even-length hex string. Must satisfy IsNonceSizeValid() in the SE
-                  emulator (CCM allows 7..13 bytes).
+                  emulator (8..13 bytes).
       aad:        Optional even-length hex string of additional authenticated data.
                   Pass None or "" to send a zero-length AAD descriptor.
       input_data: Even-length hex string with the plaintext to encrypt.
       tag_size:   Authentication tag length in bytes. Must satisfy IsTagSizeValid()
-                  (CCM allows 4, 6, 8, 10, 12, 14, 16).
+                  (0, 4, 6, 8, 10, 12, 14 or 16).
       auth_data:  Optional even-length hex string for the authorization-data descriptor
                   (INPUT0 -- separate from AAD). Defaults to empty.
 
     Returns a (ciphertext_data_ptr, tag_data_ptr) tuple of scratch-RAM addresses for the
-    two output buffers. Read them back with test_lib.read_byte() to validate results.
+    two output buffers. Read them back with test_lib.read_bytes() to validate results.
     """
 
     auth_data_bytes = hex_to_byte_list(auth_data) if auth_data else []
@@ -1442,7 +1430,7 @@ def push_aes_ccm_decrypt_command(key: str, nonce: str, aad: Optional[str], input
 
     Parameters:
       key:        Even-length hex string for the raw key bytes.
-      nonce:      Even-length hex string (7..13 bytes, subject to IsNonceSizeValid()).
+      nonce:      Even-length hex string (8..13 bytes, subject to IsNonceSizeValid()).
       aad:        Optional even-length hex string of additional authenticated data.
       input_data: Even-length hex string with the ciphertext to decrypt.
       tag:        Even-length hex string with the authentication tag to verify.
@@ -1490,7 +1478,7 @@ def push_aes_ccm_multipart_start_empty_message_command(key: str, nonce: str, aad
 
     Unlike push_aes_ccm_encrypt_command() with input_data="", this builder terminates the input
     chain right after AAD (no plaintext descriptor at all) and only emits a single, tag-only
-    output descriptor -- exercising the truncated-chain branch in HandleAesCcmEncryptCommand
+    output descriptor -- exercising the truncated-chain branch in HandleAesCcmEncryptOrDecryptCommand
     (hasInputDataDescriptor == False) rather than the "present but zero-length" branch.
 
     Command parameter words:
@@ -1732,7 +1720,7 @@ def push_hmac_command(hash_size: int, key: str, message: str) -> int:
       message:   Even-length hex string with the message bytes to authenticate.
 
     Returns the scratch-RAM address of the output MAC buffer. Read it back with
-    test_lib.read_byte() to validate the produced HMAC.
+    test_lib.read_bytes() to validate the produced HMAC.
     """
 
     assert hash_size in HMAC_HASH_SIZE_TO_MODE, f"Unsupported HMAC hash_size: {hash_size}"
@@ -2268,14 +2256,11 @@ def push_delete_key_command(key_metadata: int):
 
 def _assert_digest_matches(digest_data_ptr: int, expected_digest_hex: str, context: str) -> None:
     expected = hex_to_byte_list(expected_digest_hex)
-    actual = [test_lib.read_byte(digest_data_ptr + i) for i in range(len(expected))]
+    actual = test_lib.read_bytes(digest_data_ptr, len(expected))
     test_lib.test_assert(
         actual == expected,
         f"Hash mismatch ({context}): {bytes(actual).hex()} != {bytes(expected).hex()}",
     )
-
-def _read_state(state_data_ptr: int, state_size: int) -> List[int]:
-    return [test_lib.read_byte(state_data_ptr + i) for i in range(state_size)]
 
 def _run_multipart_hash(sha_mode: int, message_hex: str) -> int:
     """
@@ -2296,7 +2281,7 @@ def _run_multipart_hash(sha_mode: int, message_hex: str) -> int:
         block = message_bytes[cursor : cursor + block_size]
         new_state_ptr = push_hash_update_command(sha_mode, state, block)
         read_response(assert_success_status=True)
-        state = _read_state(new_state_ptr, state_size)
+        state = test_lib.read_bytes(new_state_ptr, state_size)
         cursor += block_size
 
     residual = message_bytes[cursor:]
@@ -2306,7 +2291,24 @@ def _run_multipart_hash(sha_mode: int, message_hex: str) -> int:
 
 def _bytes_to_hex(ptr: int, n: int) -> str:
     """Read n bytes from emulator RAM at `ptr` and return them as a lowercase hex string."""
-    return bytes(test_lib.read_byte(ptr + i) for i in range(n)).hex()
+    return bytes(test_lib.read_bytes(ptr, n)).hex()
+
+def push_read_device_data_command(option1: int, parameters: Sequence[int] = (), option0: int = 0) -> int:
+    """
+    Build a ReadDeviceData (0x4330) transaction.
+
+    option0 selects the OTP element (high byte) and option1 the read mode (low byte).
+    A 4-byte output descriptor receives the stub result word. Returns the output data ptr.
+    """
+    reset_segment_index()
+    output_descriptor, output_data_ptr = pack_dma_descriptor(is_last=True, data_size=4)
+    push_command(
+        SE_COMMAND_ID_READ_DEVICE_DATA,
+        (option0 << 8) | (option1 & 0xFF),
+        parameters,
+        output_dma_descriptor_ptr=output_descriptor,
+    )
+    return output_data_ptr
 
 def push_user_data_get_command() -> int:
     """
@@ -2355,7 +2357,7 @@ def aes_ecb_encrypt_decrypt_command_test():
     for vector_index, (_key, _plaintext, _expected_ciphertext) in enumerate(AES_MB_ECB_ENCRYPT_VECTOR):
         ciphertext_data_ptr = push_aes_encrypt_decrypt_command(
             is_encrypt=True,
-            crypto_mode=SE_AES_CRYPTO_MODE_EBC,
+            crypto_mode=SE_AES_CRYPTO_MODE_ECB,
             context_mode=SE_AES_ENCRYPT_DECRYPT_CONTEXT_MODE_WHOLE,
             auth_data=None,
             key=_key,
@@ -2369,7 +2371,7 @@ def aes_ecb_encrypt_decrypt_command_test():
     for vector_index, (_key, _expected_plaintext, _ciphertext) in enumerate(AES_MB_ECB_DECRYPT_VECTOR):
         plaintext_data_ptr = push_aes_encrypt_decrypt_command(
             is_encrypt=False,
-            crypto_mode=SE_AES_CRYPTO_MODE_EBC,
+            crypto_mode=SE_AES_CRYPTO_MODE_ECB,
             context_mode=SE_AES_ENCRYPT_DECRYPT_CONTEXT_MODE_WHOLE,
             auth_data=None,
             key=_key,
@@ -2383,7 +2385,7 @@ def aes_ecb_encrypt_decrypt_command_test():
     for vector_index, (_key, _plaintext, _expected_ciphertext) in enumerate(AES_ECB_TEST_VECTOR):
         ciphertext_data_ptr = push_aes_encrypt_decrypt_command(
             is_encrypt=True,
-            crypto_mode=SE_AES_CRYPTO_MODE_EBC,
+            crypto_mode=SE_AES_CRYPTO_MODE_ECB,
             context_mode=SE_AES_ENCRYPT_DECRYPT_CONTEXT_MODE_WHOLE,
             auth_data=None,
             key=_key,
@@ -2395,12 +2397,10 @@ def aes_ecb_encrypt_decrypt_command_test():
         # Read back the produced ciphertext from memory and decrypt it,
         # then assert that the recovered plaintext matches the original input.
         ciphertext_len = len(hex_to_byte_list(_plaintext))
-        produced_ciphertext = "".join(
-            f"{test_lib.read_byte(ciphertext_data_ptr + i):02x}" for i in range(ciphertext_len)
-        )
+        produced_ciphertext = bytes(test_lib.read_bytes(ciphertext_data_ptr, ciphertext_len)).hex()
         plaintext_data_ptr = push_aes_encrypt_decrypt_command(
             is_encrypt=False,
-            crypto_mode=SE_AES_CRYPTO_MODE_EBC,
+            crypto_mode=SE_AES_CRYPTO_MODE_ECB,
             context_mode=SE_AES_ENCRYPT_DECRYPT_CONTEXT_MODE_WHOLE,
             auth_data=None,
             key=_key,
@@ -2421,7 +2421,7 @@ def aes_unprotected_key_dma_layout_test():
 
     ciphertext_data_ptr = push_aes_encrypt_decrypt_command(
         is_encrypt=True,
-        crypto_mode=SE_AES_CRYPTO_MODE_EBC,
+        crypto_mode=SE_AES_CRYPTO_MODE_ECB,
         context_mode=SE_AES_ENCRYPT_DECRYPT_CONTEXT_MODE_WHOLE,
         auth_data=None,
         key=_key,
@@ -2435,7 +2435,7 @@ def aes_unprotected_key_dma_layout_test():
 
     ciphertext_data_ptr = push_aes_encrypt_decrypt_command(
         is_encrypt=True,
-        crypto_mode=SE_AES_CRYPTO_MODE_EBC,
+        crypto_mode=SE_AES_CRYPTO_MODE_ECB,
         context_mode=SE_AES_ENCRYPT_DECRYPT_CONTEXT_MODE_WHOLE,
         auth_data=None,
         key=_key,
@@ -2449,7 +2449,7 @@ def aes_unprotected_key_dma_layout_test():
 
     plaintext_data_ptr = push_aes_encrypt_decrypt_command(
         is_encrypt=False,
-        crypto_mode=SE_AES_CRYPTO_MODE_EBC,
+        crypto_mode=SE_AES_CRYPTO_MODE_ECB,
         context_mode=SE_AES_ENCRYPT_DECRYPT_CONTEXT_MODE_WHOLE,
         auth_data=None,
         key=_key,
@@ -2463,7 +2463,7 @@ def aes_unprotected_key_dma_layout_test():
 
     plaintext_data_ptr = push_aes_encrypt_decrypt_command(
         is_encrypt=False,
-        crypto_mode=SE_AES_CRYPTO_MODE_EBC,
+        crypto_mode=SE_AES_CRYPTO_MODE_ECB,
         context_mode=SE_AES_ENCRYPT_DECRYPT_CONTEXT_MODE_WHOLE,
         auth_data=None,
         key=_key,
@@ -2537,7 +2537,7 @@ def aes_ccm_decrypt_command_test():
     print("  > AES-CCM Decrypt Command OK")
 
     # Corrupted tag -> SE_RESPONSE_CRYPTO_ERROR (see ResponseCode.CryptoError in
-    # HandleAesCcmDecryptCommand). Reuses the first vector with one bit flipped in the tag.
+    # HandleAesCcmEncryptOrDecryptCommand). Reuses the first vector with the first tag byte inverted.
     _key, _plaintext, _nonce, _expected_ciphertext_and_tag, _aad = AES_CCM_TEST_VECTOR[0]
     plaintext_len = len(hex_to_byte_list(_plaintext))
     expected_ciphertext = _expected_ciphertext_and_tag[: 2 * plaintext_len]
@@ -2584,7 +2584,7 @@ def _run_multipart_ccm_encrypt(key: str, nonce: str, aad: Optional[str], plainte
             encrypt=True, key=key, context=context, input_data=bytes(chunk).hex(),
         )
         read_response(assert_success_status=True)
-        ciphertext_bytes.extend(bytes(test_lib.read_byte(output_data_ptr + i) for i in range(len(chunk))))
+        ciphertext_bytes.extend(bytes(test_lib.read_bytes(output_data_ptr, len(chunk))))
         context = _bytes_to_hex(output_context_ptr, SE_CCM_CONTEXT_SIZE)
         cursor = chunk_end
 
@@ -2593,7 +2593,7 @@ def _run_multipart_ccm_encrypt(key: str, nonce: str, aad: Optional[str], plainte
         encrypt=True, key=key, context=context, tag_size=tag_size, final_data=bytes(final_data).hex(),
     )
     read_response(assert_success_status=True)
-    ciphertext_bytes.extend(bytes(test_lib.read_byte(output_data_ptr + i) for i in range(len(final_data))))
+    ciphertext_bytes.extend(bytes(test_lib.read_bytes(output_data_ptr, len(final_data))))
     tag_hex = _bytes_to_hex(output_tag_ptr, tag_size)
 
     return bytes(ciphertext_bytes).hex(), tag_hex
@@ -2653,7 +2653,7 @@ def _run_multipart_ccm_decrypt(key: str, nonce: str, aad: Optional[str], ciphert
             encrypt=False, key=key, context=context, input_data=bytes(chunk).hex(),
         )
         read_response(assert_success_status=True)
-        plaintext_bytes.extend(bytes(test_lib.read_byte(output_data_ptr + i) for i in range(len(chunk))))
+        plaintext_bytes.extend(bytes(test_lib.read_bytes(output_data_ptr, len(chunk))))
         context = _bytes_to_hex(output_context_ptr, SE_CCM_CONTEXT_SIZE)
         cursor = chunk_end
 
@@ -2662,7 +2662,7 @@ def _run_multipart_ccm_decrypt(key: str, nonce: str, aad: Optional[str], ciphert
         encrypt=False, key=key, context=context, tag_size=tag_size, final_data=bytes(final_data).hex(), tag=tag,
     )
     status = read_response(assert_success_status=False)
-    plaintext_bytes.extend(bytes(test_lib.read_byte(output_data_ptr + i) for i in range(len(final_data))))
+    plaintext_bytes.extend(bytes(test_lib.read_bytes(output_data_ptr, len(final_data))))
 
     return bytes(plaintext_bytes).hex(), status
 
@@ -2708,7 +2708,7 @@ def aes_ccm_empty_message_test():
     against the ordinary whole-message encrypt path fed with an explicit zero-length plaintext
     descriptor. Both must produce the same tag: the emulator's CcmStart/CcmFinish core is shared
     between the two wire formats, so this exercises the hardened "hasInputDataDescriptor == False"
-    branch in HandleAesCcmEncryptCommand against a known-good reference computed by the ordinary,
+    branch in HandleAesCcmEncryptOrDecryptCommand against a known-good reference computed by the ordinary,
     already-validated branch.
     """
     _key, _plaintext, _nonce, _expected_ciphertext_and_tag, _aad = AES_CCM_TEST_VECTOR[0]
@@ -2746,7 +2746,7 @@ def hmac_command_test():
         assert len(expected_mac_bytes) == _t_len, (
             f"Vector {vector_index}: mac length {len(expected_mac_bytes)} != t_len {_t_len}"
         )
-        actual_mac_bytes = [test_lib.read_byte(mac_data_ptr + i) for i in range(_t_len)]
+        actual_mac_bytes = test_lib.read_bytes(mac_data_ptr, _t_len)
         test_lib.test_assert(
             actual_mac_bytes == expected_mac_bytes,
             f"HMAC mismatch for vector {vector_index} (hash_size={_hash_size}, t_len={_t_len}): "
@@ -2807,13 +2807,13 @@ def hash_interleaved_test():
             block = stream_a_bytes[cursor_a : cursor_a + block_a]
             state_ptr = push_hash_update_command(stream_a_mode, state_a, block)
             read_response(assert_success_status=True)
-            state_a = _read_state(state_ptr, SHA_STATE_SIZE[stream_a_mode])
+            state_a = test_lib.read_bytes(state_ptr, SHA_STATE_SIZE[stream_a_mode])
             cursor_a += block_a
         if len(stream_b_bytes) - cursor_b >= block_b:
             block = stream_b_bytes[cursor_b : cursor_b + block_b]
             state_ptr = push_hash_update_command(stream_b_mode, state_b, block)
             read_response(assert_success_status=True)
-            state_b = _read_state(state_ptr, SHA_STATE_SIZE[stream_b_mode])
+            state_b = test_lib.read_bytes(state_ptr, SHA_STATE_SIZE[stream_b_mode])
             cursor_b += block_b
 
     # Each push_hash_finish_command() resets segment_index, so stream A's output buffer is
@@ -2823,13 +2823,13 @@ def hash_interleaved_test():
         stream_a_mode, state_a, stream_a_bytes[cursor_a:], len(stream_a_bytes),
     )
     read_response(assert_success_status=True)
-    digest_a = bytes(test_lib.read_byte(digest_a_ptr + i) for i in range(SHA_DIGEST_SIZE[stream_a_mode]))
+    digest_a = bytes(test_lib.read_bytes(digest_a_ptr, SHA_DIGEST_SIZE[stream_a_mode]))
 
     digest_b_ptr = push_hash_finish_command(
         stream_b_mode, state_b, stream_b_bytes[cursor_b:], len(stream_b_bytes),
     )
     read_response(assert_success_status=True)
-    digest_b = bytes(test_lib.read_byte(digest_b_ptr + i) for i in range(SHA_DIGEST_SIZE[stream_b_mode]))
+    digest_b = bytes(test_lib.read_bytes(digest_b_ptr, SHA_DIGEST_SIZE[stream_b_mode]))
 
     expected_a = bytes(hex_to_byte_list(stream_a_expected))
     expected_b = bytes(hex_to_byte_list(stream_b_expected))
@@ -3024,14 +3024,9 @@ def import_key_command_test():
     )
     read_response(assert_success_status=True)
 
-    iv_bytes = [test_lib.read_byte(envelope_ptr + i) for i in range(SE_WRAPPED_KEY_IV_LENGTH)]
-    key_bytes_out = [
-        test_lib.read_byte(envelope_ptr + SE_WRAPPED_KEY_IV_LENGTH + i) for i in range(key_length)
-    ]
-    tag_bytes = [
-        test_lib.read_byte(envelope_ptr + SE_WRAPPED_KEY_IV_LENGTH + key_length + i)
-        for i in range(SE_WRAPPED_KEY_TAG_LENGTH)
-    ]
+    iv_bytes = test_lib.read_bytes(envelope_ptr, SE_WRAPPED_KEY_IV_LENGTH)
+    key_bytes_out = test_lib.read_bytes(envelope_ptr + SE_WRAPPED_KEY_IV_LENGTH, key_length)
+    tag_bytes = test_lib.read_bytes(envelope_ptr + SE_WRAPPED_KEY_IV_LENGTH + key_length, SE_WRAPPED_KEY_TAG_LENGTH)
     test_lib.test_assert(
         all(b == SE_WRAPPED_KEY_IV_MARKER for b in iv_bytes),
         f"IMPORT_KEY wrapped envelope IV markers invalid: {bytes(iv_bytes).hex()}",
@@ -3187,7 +3182,7 @@ def create_key_command_test():
         raw_key_length,
     )
     read_response(assert_success_status=True)
-    generated = [test_lib.read_byte(out_ptr + i) for i in range(raw_key_length)]
+    generated = test_lib.read_bytes(out_ptr, raw_key_length)
     test_lib.test_assert(
         any(b != 0 for b in generated),
         f"CREATE_KEY Raw/Unprotected: produced all-zero key (highly unlikely): {bytes(generated).hex()}",
@@ -3206,7 +3201,7 @@ def create_key_command_test():
         raw_key_length,
     )
     read_response(assert_success_status=True)
-    exported = [test_lib.read_byte(out_ptr + i) for i in range(raw_key_length)]
+    exported = test_lib.read_bytes(out_ptr, raw_key_length)
     test_lib.test_assert(
         any(b != 0 for b in exported),
         f"CREATE_KEY/EXPORT_KEY Raw/Volatile: exported key is all-zero: {bytes(exported).hex()}",
@@ -3219,11 +3214,8 @@ def create_key_command_test():
         wrapped_size,
     )
     read_response(assert_success_status=True)
-    iv_bytes = [test_lib.read_byte(out_ptr + i) for i in range(SE_WRAPPED_KEY_IV_LENGTH)]
-    tag_bytes = [
-        test_lib.read_byte(out_ptr + SE_WRAPPED_KEY_IV_LENGTH + raw_key_length + i)
-        for i in range(SE_WRAPPED_KEY_TAG_LENGTH)
-    ]
+    iv_bytes = test_lib.read_bytes(out_ptr, SE_WRAPPED_KEY_IV_LENGTH)
+    tag_bytes = test_lib.read_bytes(out_ptr + SE_WRAPPED_KEY_IV_LENGTH + raw_key_length, SE_WRAPPED_KEY_TAG_LENGTH)
     test_lib.test_assert(
         all(b == SE_WRAPPED_KEY_IV_MARKER for b in iv_bytes),
         f"CREATE_KEY Raw/Wrapped: IV markers invalid {bytes(iv_bytes).hex()}",
@@ -3255,7 +3247,7 @@ def create_key_command_test():
         blob_size,
     )
     read_response(assert_success_status=True)
-    blob = [test_lib.read_byte(out_ptr + i) for i in range(blob_size)]
+    blob = test_lib.read_bytes(out_ptr, blob_size)
     test_lib.test_assert(
         any(b != 0 for b in blob[:coord_size]),
         "CREATE_KEY ECC P-256: private key unexpectedly all-zero",
@@ -3566,38 +3558,46 @@ def user_data_storage_command_test():
     )
     print(f"  > User Data Storage Command OK")
 
-################################################
-# Tests runner
-################################################
+def read_device_data_command_test():
+    """
+    ReadDeviceData (0x4330). Option 1 selects the read mode and its parameter count.
+    The model writes a stub word of 1 for an accepted read.
+    """
+    # GetSize of CC with no parameters -> OK, stub size word.
+    out_ptr = push_read_device_data_command(SE_READ_DEVICE_DATA_GET_SIZE)
+    read_response(assert_success_status=True)
+    size = test_lib.read_doubleword(out_ptr)
+    test_lib.test_assert(size == 1, f"ReadDeviceData GetSize: got {size}, expected 1")
 
-test_lib.create_emulation(debug=DEBUG)
-test_lib.create_unit_test_machine("test", REPL_STRING)
-# Enable console logging for debugging
-#test_lib.enable_console_logging()
-#test_lib.set_log_level("semailbox", 0)
+    # GetSize does not take parameters.
+    push_read_device_data_command(SE_READ_DEVICE_DATA_GET_SIZE, (0,))
+    status = read_response(assert_success_status=False)
+    test_lib.test_assert(
+        status == SE_RESPONSE_INVALID_PARAMETER,
+        f"ReadDeviceData GetSize with a parameter: status 0x{status:08X}, expected 0x{SE_RESPONSE_INVALID_PARAMETER:08X}",
+    )
 
-print("Running tests...")
-random_command_test()
-aes_ecb_encrypt_decrypt_command_test()
-aes_unprotected_key_dma_layout_test()
-aes_cbc_encrypt_command_test()
-aes_ccm_encrypt_command_test()
-aes_ccm_decrypt_command_test()
-aes_ccm_multipart_encrypt_command_test()
-aes_ccm_multipart_decrypt_command_test()
-aes_ccm_empty_message_test()
-hmac_command_test()
-hash_command_test()
-hash_multipart_command_test()
-hash_interleaved_test()
-ecdsa_sign_command_test()
-ecdsa_verify_command_test()
-eddsa_sign_command_test()
-eddsa_verify_command_test()
-import_key_command_test()
-export_key_command_test()
-create_key_command_test()
-delete_key_command_test()
-key_create_import_export_test()
-user_data_storage_command_test()
-print("Tests completed")
+    # The shared check rejects more than two parameters.
+    push_read_device_data_command(SE_READ_DEVICE_DATA_WHOLE_ELEMENT, (0, 0, 0))
+    status = read_response(assert_success_status=False)
+    test_lib.test_assert(
+        status == SE_RESPONSE_INVALID_PARAMETER,
+        f"ReadDeviceData with 3 parameters: status 0x{status:08X}, expected 0x{SE_RESPONSE_INVALID_PARAMETER:08X}",
+    )
+
+    # ChunkOfElement requires offset and size. A short parameter list is rejected.
+    out_ptr = push_read_device_data_command(SE_READ_DEVICE_DATA_CHUNK, (0, 4))
+    read_response(assert_success_status=True)
+    chunk = test_lib.read_doubleword(out_ptr)
+    test_lib.test_assert(chunk == 1, f"ReadDeviceData chunk stub: got {chunk}, expected 1")
+
+    push_read_device_data_command(SE_READ_DEVICE_DATA_CHUNK, (0,))
+    status = read_response(assert_success_status=False)
+    test_lib.test_assert(
+        status == SE_RESPONSE_ABORT,
+        f"ReadDeviceData chunk with one parameter: status 0x{status:08X}, expected 0x{SE_RESPONSE_ABORT:08X}",
+    )
+    print("  > Read Device Data Command OK")
+
+def create_machine():
+    test_lib.create_unit_test_machine("test", REPL_STRING)

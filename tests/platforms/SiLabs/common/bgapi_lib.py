@@ -1,7 +1,15 @@
-import test_lib
+# BGAPI host side of the BLE NCP tests.
+#
+# Used as a Robot keyword library (ble_ncp.robot) and imported by pyrenode3 test_lib scripts
+# (ble_ncp.py). The few helpers that touch Renode or report failures pick the runner at call
+# time: Robot when a suite is executing, test_lib otherwise.
+import os
 import bgapi
+from robot.api import logger
+from robot.libraries.BuiltIn import BuiltIn
+from robot.running.context import EXECUTION_CONTEXTS
 
-XAPI = "tests/platforms/SiLabs/common/sl_bt.xapi"
+XAPI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sl_bt.xapi")
 DEFAULT_TIMEOUT = 2
 DEFAULT_INTERVAL = 0.1
 
@@ -66,10 +74,10 @@ def assert_no_connection_closed_event(tester_id):
     assert_event_not_in_queue(tester_id, "bt_evt_connection_closed")
 
 def assert_event_not_in_queue(tester_id, event):
-    while _get_pending_event(tester_id):
-        if _get_pending_event(tester_id) == event:
-            test_lib.fail(f"Unexpected event in queue: {event}")
-    test_lib.debug_print(f"Confirmed event \"{event}\" not in queue")
+    while (evt := _get_pending_event(tester_id)) is not None:
+        if evt == event:
+            _fail(f"Unexpected event in queue: {event}")
+    logger.debug(f"Confirmed event \"{event}\" not in queue")
 
 ########################################################################
 # Host Connection
@@ -80,18 +88,49 @@ def open_host_connection(port):
     connector = bgapi.SocketConnector("127.0.0.1", port)
     l = bgapi.BGLib(connector, XAPI, response_timeout=10)
     l.open()
-    test_lib.debug_print(f"Opened host connection on port: {port}")
+    logger.debug(f"Opened host connection on port: {port}")
     index = len(terminal_testers)
     terminal_testers[index] = l
     return index
 
 def close_all_host_connections():
-    for i in terminal_testers:
-        terminal_testers[i].close()
+    try:
+        for connection in terminal_testers.values():
+            try:
+                connection.close()
+            except Exception as e:
+                logger.warn(f"Failed to close host connection: {e}")
+    finally:
+        terminal_testers.clear()
 
 ########################################################################
 # Internals
 ########################################################################
+
+def _under_robot():
+    return EXECUTION_CONTEXTS.current is not None
+
+def _test_lib():
+    # Imported on demand: it only exists, and only works, in the pyrenode3 environment.
+    import test_lib
+    return test_lib
+
+def _monitor(command):
+    if _under_robot():
+        return BuiltIn().run_keyword("Execute Command", command)
+    return _test_lib().monitor().execute(command)
+
+def _run_for(seconds):
+    if _under_robot():
+        _monitor(f'emulation RunFor "{seconds}"')
+    else:
+        _test_lib().delay(seconds)
+
+def _fail(message):
+    if _under_robot():
+        raise AssertionError(message)
+    _test_lib().fail(message)
+
 
 def _host_connection_lookup(index):
     for i in terminal_testers:
@@ -107,33 +146,42 @@ def _get_pending_event(tester_id):
 
 def _execute_command(tester_id, command, *args):
     l = _host_connection_lookup(tester_id)
-    test_lib.monitor().execute("start")
     attrs = command.split(".")
     obj = l.bt
     for attr in attrs:
         obj = getattr(obj, attr)
-    test_lib.debug_print(f"Executing command: {command}, with args: {args}")
-    response = obj(*args)
-    test_lib.debug_print(f"Command response: {response}")
-    test_lib.monitor().execute("pause")
+    logger.debug(f"Executing command: {command}, with args: {args}")
+    _monitor("start")
+    try:
+        response = obj(*args)
+    finally:
+        _monitor("pause")
+    logger.debug(f"Command response: {response}")
     if (response.result != 0):
-        test_lib.fail(f"\"{command}\" command: response unsuccessful: {response.result}")
+        _fail(f"\"{command}\" command: response unsuccessful: {response.result}")
     return response
 
 def _wait_for_event(event, tester_id):
     return _wait_for_one_of([event], tester_id)
 
 def _wait_for_one_of(events, tester_id):
-    max_attempts = DEFAULT_TIMEOUT / DEFAULT_INTERVAL
-    for _ in range(int(max_attempts)):
+    steps = int(DEFAULT_TIMEOUT / DEFAULT_INTERVAL)
+    while True:
         evt = _get_pending_event(tester_id)
-        test_lib.debug_print(f"Waiting for one of: {events}, Current event: {evt}")
+        logger.debug(f"Waiting for one of: {events}, Current event: {evt}")
         if evt == None:
-            test_lib.delay(DEFAULT_INTERVAL)
+            if steps == 0:
+                break
+            steps -= 1
+            _run_for(DEFAULT_INTERVAL)
         else:
             for event in events:
                 if evt == event:
                     return evt
-            test_lib.fail(f"Event mismatch: {evt} not in {events}")
-    test_lib.fail(f"Timeout waiting for one of: {events}")
+            # The stack reports more events than the tests check, in an order that differs
+            # between versions. Skip them, but don't wait through a dropped connection.
+            if evt == "bt_evt_connection_closed":
+                _fail(f"Connection closed while waiting for one of: {events}")
+            logger.debug(f"Skipping event: {evt}")
+    _fail(f"Timeout waiting for one of: {events}")
     return None

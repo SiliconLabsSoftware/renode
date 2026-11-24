@@ -1,371 +1,257 @@
 *** Variables ***
-${FREQUENCY}                    39000000
-# The IP_VERSION variable must be set from command line
-# For example: renode-test --variable IP_VERSION: <EUSART VERSION to being tested> this_test.robot
-${IP_VERSION}                   2
-${REPL_STRING}=                 SEPARATOR=
-...  """                                                                 ${\n}
-...  eusart: UART.SiLabs_EUSART_${IP_VERSION} @ sysbus <0x0, +0x4000>    ${\n}
-...  cmu: Miscellaneous.SiLabs.SiLabs_CMU_1 @ sysbus <0x04000, +0x4000>  ${\n}
-...  ${SPACE*4}hfxoFrequency: ${FREQUENCY}                               ${\n}
-...  """
+${FREQUENCY}                        39000000
 
 # Registers
-${EN_REG}                     0x0004
-${CFG0_REG}                   0x0008
-${CFG1_REG}                   0x000C
-${CFG2_REG}                   0x0010
-${FRAMECFG_REG}               0x0014
-${DTXDATACFG_REG}             0x0018
-${IRHFCFG_REG}                0x001C
-${IRLFCFG_REG}                0x0020
-${TIMINGCFG_REG}              0x0024
-${STARTFRAMECFG_REG}          0x0028
-${SIGFRAMECFG_REG}            0x002C
-${CLKDIV_REG}                 0x0030
-${TRIGCTRL_REG}               0x0034
-${CMD_REG}                    0x0038
-${RXDATA_REG}                 0x003C
-${RXDATAP_REG}                0x0040
-${TXDATA_REG}                 0x0044
-${STATUS_REG}                 0x0048
-${IF_REG}                     0x004C
-${IEN_REG}                    0x0050
-${SYNCBUSY_REG}               0x0054
-${DALICFG_REG}                0x0058
-${TEST_REG}                   0x0100
+${CFG1_REG}                         0x000C
+${CMD_REG}                          0x0038
+${RXDATA_REG}                       0x003C
+${RXDATAP_REG}                      0x0040
+${TXDATA_REG}                       0x0044
+${STATUS_REG}                       0x0048
+${IF_REG}                           0x004C
+${IEN_REG}                          0x0050
 
-${IF_CLR_REG}                 0x204C
-${IEN_CLR_REG}                0x2050
-${STATUS_CLR_REG}             0x2048
+${IF_CLR_REG}                       0x204C
+${IEN_CLR_REG}                      0x2050
 
+# CMD register commands
+${CMD_NONE}                         0x0
+${CMD_RXEN}                         0x1
+${CMD_TXEN}                         0x4
+${CMD_RXEN_TXEN}                    0x5
 
-# Bit fields for EUSART STATUS 
-${_EUSART_STATUS_RESETVALUE}          0x00003040UL                 #< Default value for EUSART_STATUS
-${_EUSART_STATUS_MASK}                0x031F31FBUL                 #< Mask for EUSART_STATUS
-${EUSART_STATUS_RXENS}                0x1                          #< Receiver Enable Status
-${_EUSART_STATUS_RXENS_SHIFT}         0                            #< Shift value for EUSART_RXENS
-${_EUSART_STATUS_RXENS_MASK}          0x1                          #< Bit mask for EUSART_RXENS
-${_EUSART_STATUS_RXENS_DEFAULT}       0x00000000                   #< Mode DEFAULT for EUSART_STATUS
-${EUSART_STATUS_RXENS_DEFAULT}        0x00000000                   #< Shifted mode DEFAULT for EUSART_STATUS
-${EUSART_STATUS_TXENS}                0x2                          #< Transmitter Enable Status
-${_EUSART_STATUS_TXENS_SHIFT}         1                            #< Shift value for EUSART_TXENS
-${_EUSART_STATUS_TXENS_MASK}          0x2                          #< Bit mask for EUSART_TXENS
-${_EUSART_STATUS_TXENS_DEFAULT}       0x00000000                   #< Mode DEFAULT for EUSART_STATUS
+# Bit fields for EUSART STATUS
+${EUSART_STATUS_RXENS}              0x1                     #< Receiver Enable Status
+${EUSART_STATUS_TXENS}              0x2                     #< Transmitter Enable Status
 
-# Bit fields for EUSART IF 
-${_EUSART_IF_MASK}                    0x030D3FFF                   #< Mask for EUSART_IF
-${_EUSART_IF_CSWU_MASK}               0x00010000                   #< Bit mask for EUSART_CSWU
-${EUSART_IF_TXC}                      0x1                          #< TX Complete Interrupt Flag                 
-${EUSART_IF_RXFL}                     0x3                          #< RX FIFO Level Interrupt Flag                
-${EUSART_IF_STARTF}                   0x1000000                    #< Start Frame Interrupt Flag
-
-# Bit fields for EUSART SYNCBUSY 
-${_EUSART_SYNCBUSY_RESETVALUE}        0x00000000                   #< Default value for EUSART_SYNCBUSY           
-${_EUSART_SYNCBUSY_MASK}              0x00000FFF                   #< Mask for EUSART_SYNCBUSY                    
-${EUSART_SYNCBUSY_DIV}                0x1                          #< SYNCBUSY for DIV in CLKDIV                  
-${_EUSART_SYNCBUSY_DIV_SHIFT}         0                            #< Shift value for EUSART_DIV                  
-${_EUSART_SYNCBUSY_DIV_MASK}          0x1                          #< Bit mask for EUSART_DIV                     
-${_EUSART_SYNCBUSY_DIV_DEFAULT}       0x00000000                   #< Mode DEFAULT for EUSART_SYNCBUS
+# Bit fields for EUSART IF
+${_EUSART_IF_MASK}                  0x030D3FFF              #< Mask for EUSART_IF
+${_EUSART_IF_CSWU_MASK}             0x00010000              #< Bit mask for EUSART_CSWU
+${EUSART_IF_TXC}                    0x1                     #< TX Complete Interrupt Flag
+${EUSART_IF_RXFL}                   0x4                     #< RX FIFO Level Interrupt Flag
+${EUSART_IF_STARTF}                 0x40000                 #< Start Frame Interrupt Flag
 
 # test specific vars
-${NUM_SAMPLES}                        0x4
-${EXPECTED_START_STATUS_TX}           0x3042  
-${EXPECTED_END_STATUS_TX}             0x3062  
-${EXPECTED_START_IF_TX}               0x2  
-${EXPECTED_END_IF_TX}                 0x3  
-${EXPECTED_START_STATUS_RX}           0x3041
-${EXPECTED_START_IF_RX}               0x0
-${EXPECTED_END_IF_RX}                 0x4
+${NUM_SAMPLES}                      0x4
+${EXPECTED_START_STATUS_TX}         0x3042
+${EXPECTED_END_STATUS_TX}           0x3062
+${EXPECTED_START_IF_TX}             0x2
+${EXPECTED_END_IF_TX}               0x3
+${EXPECTED_START_STATUS_RX}         0x3041
+${EXPECTED_START_IF_RX}             0x0
+${EXPECTED_END_IF_RX}               0x4
 
-${CFG1_RXWATERMARK_2}                 0x08000000
-${CFG1_RXWATERMARK_3}                 0x10000000
-${EXPECTED_START_STATUS_RX_MULTI}     0x3041  
-${EXPECTED_END_STATUS_RX_MULTI}       0x30C1  
+${CFG1_RXWATERMARK_2}               0x08000000
+${CFG1_RXWATERMARK_3}               0x10000000
+${EXPECTED_START_STATUS_RX_MULTI}   0x3041
+${EXPECTED_END_STATUS_RX_MULTI}     0x30C1
 
 *** Keywords ***
 Create Machine
-    Execute Command             mach create "test"
-    Execute Command             machine LoadPlatformDescriptionFromString ${REPL_STRING}
+    [Arguments]                     ${ip_version}
+    Reset Emulation
+    Execute Command                 mach create "test"
+    ${repl}=  Catenate              SEPARATOR=\n
+    ...  """
+    ...  eusart: UART.SiLabs_EUSART_${ip_version} @ sysbus <0x0, +0x4000>
+    ...  cmu: Miscellaneous.SiLabs.SiLabs_CMU_1 @ sysbus <0x04000, +0x4000>
+    ...  ${SPACE*4}hfxoFrequency: ${FREQUENCY}
+    ...  """
+    Execute Command                 machine LoadPlatformDescriptionFromString ${repl}
 
-Enable Rx Command
-    Execute Command             sysbus.eusart WriteDoubleWord ${CMD_REG} 0x1
+Write Register
+    [Arguments]                     ${register}  ${value}
+    Execute Command                 sysbus.eusart WriteDoubleWord ${register} ${value}
 
-Disable Rx Command
-    Execute Command             sysbus.eusart WriteDoubleWord ${CMD_REG} 0x2
+Register Should Be Equal
+    [Arguments]                     ${register}  ${expected}
+    ${value}=  Execute Command      sysbus.eusart ReadDoubleWord ${register}
+    Should Be Equal As Integers     ${value}  ${expected}
 
-Enable Tx Command
-    Execute Command             sysbus.eusart WriteDoubleWord ${CMD_REG} 0x4
+RX FIFO Level Flag Should Be ${state:(Set|Clear)}
+    IF  '${state}' == 'Set'
+        Register Should Be Equal    ${IF_REG}  ${EXPECTED_END_IF_RX}
+        Register Should Be Equal    ${STATUS_REG}  ${EXPECTED_END_STATUS_RX_MULTI}
+    ELSE
+        Register Should Be Equal    ${IF_REG}  ${EXPECTED_START_IF_RX}
+        Register Should Be Equal    ${STATUS_REG}  ${EXPECTED_START_STATUS_RX_MULTI}
+    END
 
-Enable Rx Tx Command
-    Execute Command             sysbus.eusart WriteDoubleWord ${CMD_REG} 0x5
+Command Should Set Enable Status
+    [Arguments]                     ${ip_version}  ${command}  ${rxens}  ${txens}
+    Create Machine                  ${ip_version}
+    Write Register                  ${CMD_REG}  ${command}
+    ${status}=  Execute Command     sysbus.eusart ReadDoubleWord ${STATUS_REG}
+    Should Be Equal As Integers     ${{int($status, 16) & ${EUSART_STATUS_RXENS}}}  ${rxens}  #check RXENS
+    Should Be Equal As Integers     ${{int($status, 16) & ${EUSART_STATUS_TXENS}}}  ${txens}  #check TXENS
 
-Disable Tx Command
-    Execute Command             sysbus.eusart WriteDoubleWord ${CMD_REG} 0x8
+Interrupt Registers Should Set And Clear
+    [Arguments]                     ${ip_version}
+    Create Machine                  ${ip_version}
+    Write Register                  ${CMD_REG}  ${CMD_RXEN_TXEN}
+    #TXFL goes high as soon as there is space in the Tx FIFO,
+    #so IF reads 0x2 once the transmitter is enabled.
+    Register Should Be Equal        ${IF_REG}  0x2
 
-Disable RXBLOCK Command
-    Execute Command             sysbus.eusart WriteDoubleWord ${CMD_REG} 0x10
-
-All Off Command
-    Execute Command             sysbus.eusart WriteDoubleWord ${CMD_REG} 0x0
-
-Assert Receive IRQ Is Set
-    ${irqState}=                    Execute Command  sysbus.eusart ReceiveIRQ
-    Should Contain                  ${irqState}  GPIO: set
-
-Assert Receive IRQ Is Unset
-    ${irqState}=                    Execute Command  sysbus.eusart ReceiveIRQ
-    Should Contain                  ${irqState}  GPIO: unset
-
-Assert Transmit IRQ Is Set
-    ${irqState}=                    Execute Command  sysbus.eusart TransmitIRQ
-    Should Contain                  ${irqState}  GPIO: set
-
-Assert Transmit IRQ Is Unset
-    ${irqState}=                    Execute Command  sysbus.eusart TransmitIRQ
-    Should Contain                  ${irqState}  GPIO: unset
-   
-*** Test Cases ***
-EUSART IP Selection
-    Log to Console                SiLabs_EUSART_${IP_VERSION} TESTSUITE
-    Log to Console                ${REPL_STRING}
-    
-Enable Rx Only
-    Create Machine
-    Enable Rx Command    
-    ${statusState}=             Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG} #Read STATUS register RXEN only 
-    ${read_val}                 evaluate  hex(${statusState} & int("${_EUSART_STATUS_RXENS_MASK}",16)) #check RXENS 
-    ${check_val}                evaluate  hex(${EUSART_STATUS_RXENS})               
-    Should Be Equal As Integers   ${read_val}  ${check_val}    
-    ${read_val}                 evaluate  hex(${statusState} & int("${_EUSART_STATUS_TXENS_MASK}",16)) #check TXENS
-    ${check_val}                evaluate  0x0                
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    Disable Rx Command
-
-Enable Tx Only
-    Create Machine
-    Enable Tx Command
-    ${statusState}=             Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG} #Read STATUS register TXEN only 
-    ${read_val}                 evaluate  hex(${statusState} & int("${_EUSART_STATUS_RXENS_MASK}",16)) #check RXENS 
-    ${check_val}                evaluate  0x0               
-    Should Be Equal As Integers   ${read_val}  ${check_val}      
-    ${read_val}                 evaluate  hex(${statusState} & int("${_EUSART_STATUS_TXENS_MASK}",16)) #check TXENS 
-    ${check_val}                evaluate  hex(${EUSART_STATUS_TXENS})                 
-    Should Be Equal As Integers   ${read_val}  ${check_val}
-    Disable Tx Command
-
-Enable Rx Tx
-    Create Machine
-    Enable Rx Tx Command
-    ${statusState}=             Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG} #Read STATUS register TXEN only 
-    ${read_val}                 evaluate  hex(${statusState} & int("${_EUSART_STATUS_RXENS_MASK}",16)) #check RXENS 
-    ${check_val}                evaluate  hex(${EUSART_STATUS_RXENS})               
-    Should Be Equal As Integers   ${read_val}  ${check_val}      
-    ${read_val}                 evaluate  hex(${statusState} & int("${_EUSART_STATUS_TXENS_MASK}",16)) #check TXENS 
-    ${check_val}                evaluate  hex(${EUSART_STATUS_TXENS})                 
-    Should Be Equal As Integers   ${read_val}  ${check_val}    
-    All Off Command
-
-Enables Disabled
-    Create Machine
-    All Off Command
-    ${statusState}=             Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG} #Read STATUS register TXEN only 
-    ${read_val}                 evaluate  hex(${statusState} & int("${_EUSART_STATUS_RXENS_MASK}",16)) #check RXENS 
-    ${check_val}                evaluate  0x0               
-    Should Be Equal As Integers   ${read_val}  ${check_val}      
-    ${read_val}                 evaluate  hex(${statusState} & int("${_EUSART_STATUS_TXENS_MASK}",16)) #check TXENS 
-    ${check_val}                evaluate  0x0                 
-    Should Be Equal As Integers   ${read_val}  ${check_val}  
-
-Interrupts 
-    Create Machine
-    Enable Rx Tx Command
-    ${check_val}                  evaluate  hex(2) #TXFL goes high as soon as there is space in the Tx FIFO.
-    ${read_val}=                  Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG}
-    #Test reset value;
-    Should Be Equal As Integers   ${read_val}  ${check_val} 
-   
-    #set sync busy reg
-    Execute Command               sysbus.eusart WriteDoubleWord ${SYNCBUSY_REG} ${_EUSART_SYNCBUSY_MASK }
     #check setting interrupt flags
-    ${flag}                       evaluate  hex(int("${_EUSART_IF_MASK}",16) & ~int("${_EUSART_IF_CSWU_MASK}",16))  #EM2 mode
-    Execute Command               sysbus.eusart WriteDoubleWord ${IF_REG} ${flag}
-    ${read_val}=                  Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG}
-    Should Be Equal As Integers   ${read_val}  ${flag}
+    ${flag}=  Set Variable          ${{hex(${_EUSART_IF_MASK} & ~${_EUSART_IF_CSWU_MASK})}}  #EM2 mode
+    Write Register                  ${IF_REG}  ${flag}
+    Register Should Be Equal        ${IF_REG}  ${flag}
 
-    #check intEnable 
-    ${flag}                       evaluate  hex( int("${EUSART_IF_RXFL}",16) | int("${EUSART_IF_STARTF}",16) | int("${EUSART_IF_TXC}",16) )
-    Execute Command               sysbus.eusart WriteDoubleWord ${IEN_REG} ${flag}
-    ${read_val}=                  Execute Command  sysbus.eusart ReadDoubleWord ${IEN_REG}
-    Should Be Equal As Integers   ${read_val}  ${flag}
+    #check intEnable
+    ${flag}=  Set Variable          ${{hex(${EUSART_IF_RXFL} | ${EUSART_IF_STARTF} | ${EUSART_IF_TXC})}}
+    Write Register                  ${IEN_REG}  ${flag}
+    Register Should Be Equal        ${IEN_REG}  ${flag}
 
     #check intDisable
-    ${check_val}                  evaluate  hex(0)
-    Execute Command               sysbus.eusart WriteDoubleWord ${IEN_CLR_REG} ${flag}
-    ${read_val}=                  Execute Command  sysbus.eusart ReadDoubleWord ${IEN_REG}
-    Should Be Equal As Integers   ${read_val}  ${check_val}
+    Write Register                  ${IEN_CLR_REG}  ${flag}
+    Register Should Be Equal        ${IEN_REG}  0x0
 
     #checkIntClear
-    ${if_before_clear}=           Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG}
-    ${flag}                       evaluate  hex(int("${_EUSART_IF_MASK}",16) & ~(int("${flag}",16) | 3))
-    Execute Command               sysbus.eusart WriteDoubleWord ${IF_CLR_REG} ${flag}
-    ${read_val}=                  Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG}
-    ${check_val}                  evaluate  hex(${if_before_clear} & ~int("${flag}",16))
-    Should Be Equal As Integers   ${read_val}  ${check_val}
+    ${if_before_clear}=  Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG}
+    ${flag}=  Set Variable          ${{hex(${_EUSART_IF_MASK} & ~(${flag} | 3))}}
+    Write Register                  ${IF_CLR_REG}  ${flag}
+    Register Should Be Equal        ${IF_REG}  ${{int($if_before_clear, 16) & ~${flag}}}
 
-    #clear sync busy reg
-    Execute Command               sysbus.eusart WriteDoubleWord ${SYNCBUSY_REG} 0x00000000
-    Disable RXBLOCK Command
+Asynchronous TX Should Transmit Frames
+    [Arguments]                     ${ip_version}
+    Create Machine                  ${ip_version}
+    #select ${NUM_SAMPLES} distinct random numbers between 1 and 10 inclusive
+    ${data_list}=  Set Variable     ${{random.sample(range(1, 11), ${NUM_SAMPLES})}}
 
-Asynchronous TX 
-    Create Machine
-    ${data_list}=                       evaluate  random.sample(range(1, 11), ${NUM_SAMPLES})  #select a random number between 1 and 10 inclusive
-    
-    Enable Tx Command
-    ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG} #Read STATUS register TXEN only 
-    ${statusState}=             Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG} #Read STATUS register TXEN only 
-    Should Be Equal As Integers  ${statusState}  ${EXPECTED_START_STATUS_TX}
+    Write Register                  ${CMD_REG}  ${CMD_TXEN}
+    Register Should Be Equal        ${STATUS_REG}  ${EXPECTED_START_STATUS_TX}
 
     FOR  ${data}  IN  @{data_list}
-        ${statusState}=             Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG} #Read STATUS register TXEN only 
-        ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG} #Read STATUS register TXEN only 
-        Should Be Equal As Integers  ${InteruptFlagState}  ${EXPECTED_START_IF_TX}
-        Execute Command               sysbus.eusart WriteDoubleWord ${TXDATA_REG} ${data}
-        ${statusState}=             Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG} #Read STATUS register TXEN only 
-        ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG} #Read STATUS register TXEN only
-        Should Be Equal As Integers  ${InteruptFlagState}  ${EXPECTED_END_IF_TX}
-        Should Be Equal As Integers  ${statusState}  ${expected_end_status_tx}        
-        #clear tx complete Interupt flag when new frame is available
-        Execute Command  sysbus.eusart WriteDoubleWord ${IF_REG} 0x2
-        #clear tx complete status (software would do)
-    END 
-    Disable Tx Command
-
-Asynchronous RX
-    Create Machine
-    ${data_list}=                       evaluate  random.sample(range(97, 108), ${NUM_SAMPLES})  #select a random number between chars a-k in ascii
-    
-    Enable Rx Command
-
-    FOR  ${data}  IN  @{data_list}
-        ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG} #Read STATUS register TXEN only 
-        ${statusState}=             Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG} #Read STATUS register TXEN only 
-
-        ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG} #Read STATUS register TXEN only 
-        ${statusState}=             Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG} #Read STATUS register TXEN only 
-        Should Be Equal As Integers  ${statusState}  ${_expected_start_status_rx}
-        Should Be Equal As Integers  ${InteruptFlagState}  ${EXPECTED_START_IF_RX}
-
-        Execute Command  sysbus.eusart WriteChar ${data}
-
-        ${rxData}=             Execute Command  sysbus.eusart ReadDoubleWord ${RXDATA_REG} 
-        Should Be Equal As Integers  ${rxData}  ${data}
-        ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG} #Read STATUS register TXEN only 
-        ${statusState}=             Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG} #Read STATUS register TXEN only 
+        Register Should Be Equal    ${IF_REG}  ${EXPECTED_START_IF_TX}
+        Write Register              ${TXDATA_REG}  ${data}
+        Register Should Be Equal    ${IF_REG}  ${EXPECTED_END_IF_TX}
+        Register Should Be Equal    ${STATUS_REG}  ${EXPECTED_END_STATUS_TX}
+        #clear the TX complete flag before the next frame, as software would, leaving only TXFL set
+        Write Register              ${IF_REG}  0x2
     END
-    
-    Disable Rx Command
 
-RX DATA PEAK
-    Create Machine
-    ${data_list}=                       evaluate  random.sample(range(97, 108), ${NUM_SAMPLES})  #select a random number between chars a-k in ascii
-    
-    Enable Rx Command
+Asynchronous RX Should Receive Frames
+    [Arguments]                     ${ip_version}
+    Create Machine                  ${ip_version}
+    #select ${NUM_SAMPLES} distinct random characters between a and k
+    ${data_list}=  Set Variable     ${{random.sample(range(97, 108), ${NUM_SAMPLES})}}
+
+    Write Register                  ${CMD_REG}  ${CMD_RXEN}
+
+    FOR  ${data}  IN  @{data_list}
+        Register Should Be Equal    ${STATUS_REG}  ${EXPECTED_START_STATUS_RX}
+        Register Should Be Equal    ${IF_REG}  ${EXPECTED_START_IF_RX}
+        Execute Command             sysbus.eusart WriteChar ${data}
+        Register Should Be Equal    ${RXDATA_REG}  ${data}
+    END
+
+RXDATAP Should Not Pop The FIFO
+    [Arguments]                     ${ip_version}
+    Create Machine                  ${ip_version}
+    #select a random number between chars a-k in ascii
+    ${data}=  Set Variable          ${{random.randint(97, 107)}}
+
+    Write Register                  ${CMD_REG}  ${CMD_RXEN}
 
     # Write data into receive pipeline fifos
-    Execute Command  sysbus.eusart WriteChar ${data_list}[0]
+    Execute Command                 sysbus.eusart WriteChar ${data}
 
     # Read fifo slot twice to ensure RXDATAP does not pop from the fifo
-    ${rxData}=             Execute Command  sysbus.eusart ReadDoubleWord ${RXDATAP_REG} 
-    Should Be Equal As Integers  ${rxData}  ${data_list}[0]
-    ${rxData}=             Execute Command  sysbus.eusart ReadDoubleWord ${RXDATAP_REG} 
-    Should Be Equal As Integers  ${rxData}  ${data_list}[0]
-    Disable Rx Command
+    Register Should Be Equal        ${RXDATAP_REG}  ${data}
+    Register Should Be Equal        ${RXDATAP_REG}  ${data}
 
-Asynchronous RX Multiframe
-    Create Machine
-    ${data_list}=                       evaluate  random.sample(range(97, 108), ${NUM_SAMPLES})  #select a random number between chars a-k in ascii
+Asynchronous RX Should Honour The FIFO Watermark
+    [Arguments]                     ${ip_version}
+    Create Machine                  ${ip_version}
+    #select ${NUM_SAMPLES} distinct random characters between a and k
+    ${data_list}=  Set Variable     ${{random.sample(range(97, 108), ${NUM_SAMPLES})}}
 
-    Enable Rx Command
-    
+    Write Register                  ${CMD_REG}  ${CMD_RXEN}
+
     # Assert rxflif is zero to start
-    ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG}
-    ${StatusState}=       Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers  ${InteruptFlagState}  ${EXPECTED_START_IF_RX}
-    Should Be Equal As Integers  ${StatusState}  ${EXPECTED_START_STATUS_RX_MULTI} 
+    RX FIFO Level Flag Should Be Clear
 
     # Write data into receive pipeline fifos
-    Execute Command  sysbus.eusart WriteChar ${data_list}[0]
+    Execute Command                 sysbus.eusart WriteChar ${data_list}[0]
 
     # Check RXFLIF is set as watermark is set to 1 currently
-    ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG}
-    ${StatusState}=       Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers  ${InteruptFlagState}  ${EXPECTED_END_IF_RX} 
-    Should Be Equal As Integers  ${StatusState}  ${EXPECTED_END_STATUS_RX_MULTI} 
+    RX FIFO Level Flag Should Be Set
 
-    # Reset interupt flag by emptying fifo by popping the single data element inserted
-    ${rxData}=             Execute Command  sysbus.eusart ReadDoubleWord ${RXDATA_REG} 
-    ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG}
-    ${StatusState}=       Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers  ${InteruptFlagState}  ${EXPECTED_START_IF_RX}
-    Should Be Equal As Integers  ${StatusState}  ${EXPECTED_START_STATUS_RX_MULTI} 
+    # Reset interrupt flag by emptying fifo by popping the single data element inserted
+    Execute Command                 sysbus.eusart ReadDoubleWord ${RXDATA_REG}
+    RX FIFO Level Flag Should Be Clear
 
     # Reconfigure fifo watermark to 2
-    Execute Command  sysbus.eusart WriteDoubleWord ${CFG1_REG} ${CFG1_RXWATERMARK_2}
+    Write Register                  ${CFG1_REG}  ${CFG1_RXWATERMARK_2}
 
     # Write single data element into fifo and ensure RXFLIF is not set
-    Execute Command  sysbus.eusart WriteChar ${data_list}[0]
-    ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG}
-    ${StatusState}=       Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers  ${StatusState}  ${EXPECTED_START_STATUS_RX_MULTI} 
-    Should Be Equal As Integers  ${InteruptFlagState}  ${EXPECTED_START_IF_RX}
+    Execute Command                 sysbus.eusart WriteChar ${data_list}[0]
+    RX FIFO Level Flag Should Be Clear
 
     # Write second data element into fifo and ensure RXFLIF is set
-    Execute Command  sysbus.eusart WriteChar ${data_list}[1]
-    ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG}
-    ${StatusState}=       Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers  ${InteruptFlagState}  ${EXPECTED_END_IF_RX}
-    Should Be Equal As Integers  ${StatusState}  ${EXPECTED_END_STATUS_RX_MULTI} 
+    Execute Command                 sysbus.eusart WriteChar ${data_list}[1]
+    RX FIFO Level Flag Should Be Set
 
-    # Reset interupt flag by emptying fifo by popping the both data elements inserted
-    ${rxData}=             Execute Command  sysbus.eusart ReadDoubleWord ${RXDATA_REG} 
-    ${rxData}=             Execute Command  sysbus.eusart ReadDoubleWord ${RXDATA_REG} 
-    ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG}
-    ${StatusState}=       Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers  ${InteruptFlagState}  ${EXPECTED_START_IF_RX}
-    Should Be Equal As Integers  ${StatusState}  ${EXPECTED_START_STATUS_RX_MULTI} 
+    # Reset interrupt flag by emptying fifo by popping both data elements inserted
+    Execute Command                 sysbus.eusart ReadDoubleWord ${RXDATA_REG}
+    Execute Command                 sysbus.eusart ReadDoubleWord ${RXDATA_REG}
+    RX FIFO Level Flag Should Be Clear
 
     # Reconfigure fifo watermark to 3
-    Execute Command  sysbus.eusart WriteDoubleWord ${CFG1_REG} ${CFG1_RXWATERMARK_3} 
+    Write Register                  ${CFG1_REG}  ${CFG1_RXWATERMARK_3}
 
     # Write single data element into fifo and ensure RXFLIF is not set
-    Execute Command  sysbus.eusart WriteChar ${data_list}[0]
-    ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG}
-    ${StatusState}=       Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers  ${InteruptFlagState}  ${EXPECTED_START_IF_RX}
-    Should Be Equal As Integers  ${StatusState}  ${EXPECTED_START_STATUS_RX_MULTI} 
+    Execute Command                 sysbus.eusart WriteChar ${data_list}[0]
+    RX FIFO Level Flag Should Be Clear
 
     # Write second data element into fifo and ensure RXFLIF is not set
-    Execute Command  sysbus.eusart WriteChar ${data_list}[1]
-    ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG}
-    ${StatusState}=       Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG}
-    Should Be Equal As Integers  ${InteruptFlagState}  ${EXPECTED_START_IF_RX}
-    Should Be Equal As Integers  ${StatusState}  ${EXPECTED_START_STATUS_RX_MULTI} 
+    Execute Command                 sysbus.eusart WriteChar ${data_list}[1]
+    RX FIFO Level Flag Should Be Clear
 
     # Write third data element into fifo and ensure RXFLIF is set
-    Execute Command  sysbus.eusart WriteChar ${data_list}[2]
-    ${StatusState}=       Execute Command  sysbus.eusart ReadDoubleWord ${STATUS_REG}
-    ${InteruptFlagState}=       Execute Command  sysbus.eusart ReadDoubleWord ${IF_REG}
-    Should Be Equal As Integers  ${InteruptFlagState}  ${EXPECTED_END_IF_RX}
-    Should Be Equal As Integers  ${StatusState}  ${EXPECTED_END_STATUS_RX_MULTI} 
+    Execute Command                 sysbus.eusart WriteChar ${data_list}[2]
+    RX FIFO Level Flag Should Be Set
 
     # Read out all data elements from fifo and ensure they are correct values
-    ${rxData}=             Execute Command  sysbus.eusart ReadDoubleWord ${RXDATA_REG}
-    Should Be Equal As Integers  ${rxData}  ${data_list}[0]
-    ${rxData}=             Execute Command  sysbus.eusart ReadDoubleWord ${RXDATA_REG}
-    Should Be Equal As Integers  ${rxData}  ${data_list}[1]
-    ${rxData}=             Execute Command  sysbus.eusart ReadDoubleWord ${RXDATA_REG}
-    Should Be Equal As Integers  ${rxData}  ${data_list}[2]
+    Register Should Be Equal        ${RXDATA_REG}  ${data_list}[0]
+    Register Should Be Equal        ${RXDATA_REG}  ${data_list}[1]
+    Register Should Be Equal        ${RXDATA_REG}  ${data_list}[2]
 
-    Disable Rx Command
+*** Test Cases ***
+Should Report RX And TX Enable Status
+    [Template]                      Command Should Set Enable Status
+    # IP version  command           RXENS                   TXENS
+    2             ${CMD_RXEN}       ${EUSART_STATUS_RXENS}  0
+    4             ${CMD_RXEN}       ${EUSART_STATUS_RXENS}  0
+    2             ${CMD_TXEN}       0                       ${EUSART_STATUS_TXENS}
+    4             ${CMD_TXEN}       0                       ${EUSART_STATUS_TXENS}
+    2             ${CMD_RXEN_TXEN}  ${EUSART_STATUS_RXENS}  ${EUSART_STATUS_TXENS}
+    4             ${CMD_RXEN_TXEN}  ${EUSART_STATUS_RXENS}  ${EUSART_STATUS_TXENS}
+    2             ${CMD_NONE}       0                       0
+    4             ${CMD_NONE}       0                       0
 
+Should Set And Clear Interrupt Registers
+    [Template]                      Interrupt Registers Should Set And Clear
+    2
+    4
+
+Should Transmit Asynchronous Frames
+    [Template]                      Asynchronous TX Should Transmit Frames
+    2
+    4
+
+Should Receive Asynchronous Frames
+    [Template]                      Asynchronous RX Should Receive Frames
+    2
+    4
+
+Should Peek RX Data Without Popping
+    [Template]                      RXDATAP Should Not Pop The FIFO
+    2
+    4
+
+Should Raise RX FIFO Level Flag At Watermark
+    [Template]                      Asynchronous RX Should Honour The FIFO Watermark
+    2
+    4

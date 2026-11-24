@@ -165,7 +165,8 @@ function buildHostLibrary() {
   const buildDir = path.join(rootDir, 'build')
   fs.mkdirSync(buildDir, { recursive: true })
   const libDir = path.join(rootDir, 'tools', 'external_control_client', 'lib')
-  execFileSync('cmake', ['-DCMAKE_BUILD_SHARED_LIBS=ON', libDir], {
+  // Builds librenode_api.so with the virtual time override that test_lib preloads into host processes.
+  execFileSync('cmake', ['-DRENODE_API_TIME_OVERRIDE=ON', '-DRENODE_API_SANITIZERS=OFF', libDir], {
     cwd: buildDir,
     stdio: 'inherit',
   })
